@@ -18,7 +18,6 @@ nbactions.xml
 
 # gradle stuff
 .gradle/
-build/
 
 # maven stuff (to be removed when trunk becomes 4.x)
 *-execution-hints.log
