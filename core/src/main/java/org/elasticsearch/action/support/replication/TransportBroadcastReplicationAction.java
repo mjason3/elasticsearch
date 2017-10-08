@@ -93,7 +93,7 @@ public abstract class TransportBroadcastReplicationAction<Request extends Broadc
                 }
 
                 @Override
-                public void onFailure(Throwable e) {
+                public void onFailure(Exception e) {
                     logger.trace("{}: got failure from {}", actionName, shardId);
                     int totalNumCopies = clusterState.getMetaData().getIndexSafe(shardId.getIndex()).getNumberOfReplicas() + 1;
                     ShardResponse shardResponse = newShardResponse();
@@ -119,7 +119,6 @@ public abstract class TransportBroadcastReplicationAction<Request extends Broadc
     protected void shardExecute(Task task, Request request, ShardId shardId, ActionListener<ShardResponse> shardActionListener) {
         ShardRequest shardRequest = newShardRequest(request, shardId);
         shardRequest.setParentTask(clusterService.localNode().getId(), task.getId());
-        taskManager.registerChildTask(task, clusterService.localNode().getId());
         replicatedBroadcastShardAction.execute(shardRequest, shardActionListener);
     }
 

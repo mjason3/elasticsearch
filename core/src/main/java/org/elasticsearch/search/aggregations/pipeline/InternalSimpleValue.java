@@ -23,36 +23,17 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.search.DocValueFormat;
-import org.elasticsearch.search.aggregations.AggregationStreams;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.metrics.InternalNumericMetricsAggregation;
-import org.elasticsearch.search.aggregations.metrics.max.InternalMax;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class InternalSimpleValue extends InternalNumericMetricsAggregation.SingleValue implements SimpleValue {
-
-    public final static Type TYPE = new Type("simple_value");
-
-    public final static AggregationStreams.Stream STREAM = new AggregationStreams.Stream() {
-        @Override
-        public InternalSimpleValue readResult(StreamInput in) throws IOException {
-            InternalSimpleValue result = new InternalSimpleValue();
-            result.readFrom(in);
-            return result;
-        }
-    };
-
-    public static void registerStreams() {
-        AggregationStreams.registerStream(STREAM, TYPE.stream());
-    }
-
-    private double value;
-
-    protected InternalSimpleValue() {
-    } // for serialization
+    public static final String NAME = "simple_value";
+    protected final double value;
 
     public InternalSimpleValue(String name, double value, DocValueFormat formatter, List<PipelineAggregator> pipelineAggregators,
             Map<String, Object> metaData) {
@@ -61,27 +42,11 @@ public class InternalSimpleValue extends InternalNumericMetricsAggregation.Singl
         this.value = value;
     }
 
-    @Override
-    public double value() {
-        return value;
-    }
-
-    public double getValue() {
-        return value;
-    }
-
-    @Override
-    public Type type() {
-        return TYPE;
-    }
-
-    @Override
-    public InternalMax doReduce(List<InternalAggregation> aggregations, ReduceContext reduceContext) {
-        throw new UnsupportedOperationException("Not supported");
-    }
-
-    @Override
-    protected void doReadFrom(StreamInput in) throws IOException {
+    /**
+     * Read from a stream.
+     */
+    public InternalSimpleValue(StreamInput in) throws IOException {
+        super(in);
         format = in.readNamedWriteable(DocValueFormat.class);
         value = in.readDouble();
     }
@@ -93,12 +58,46 @@ public class InternalSimpleValue extends InternalNumericMetricsAggregation.Singl
     }
 
     @Override
+    public String getWriteableName() {
+        return NAME;
+    }
+
+    @Override
+    public double value() {
+        return value;
+    }
+
+    public double getValue() {
+        return value;
+    }
+
+    DocValueFormat formatter() {
+        return format;
+    }
+
+    @Override
+    public InternalSimpleValue doReduce(List<InternalAggregation> aggregations, ReduceContext reduceContext) {
+        throw new UnsupportedOperationException("Not supported");
+    }
+
+    @Override
     public XContentBuilder doXContentBody(XContentBuilder builder, Params params) throws IOException {
         boolean hasValue = !(Double.isInfinite(value) || Double.isNaN(value));
-        builder.field(CommonFields.VALUE, hasValue ? value : null);
+        builder.field(CommonFields.VALUE.getPreferredName(), hasValue ? value : null);
         if (hasValue && format != DocValueFormat.RAW) {
-            builder.field(CommonFields.VALUE_AS_STRING, format.format(value));
+            builder.field(CommonFields.VALUE_AS_STRING.getPreferredName(), format.format(value));
         }
         return builder;
+    }
+
+    @Override
+    protected int doHashCode() {
+        return Objects.hash(value);
+    }
+
+    @Override
+    protected boolean doEquals(Object obj) {
+        InternalSimpleValue other = (InternalSimpleValue) obj;
+        return Objects.equals(value, other.value);
     }
 }

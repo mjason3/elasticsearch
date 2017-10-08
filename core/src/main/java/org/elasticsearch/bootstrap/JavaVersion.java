@@ -33,9 +33,7 @@ public class JavaVersion implements Comparable<JavaVersion> {
     }
 
     private JavaVersion(List<Integer> version) {
-        if (version.size() >= 2
-                && version.get(0).intValue() == 1
-                && version.get(1).intValue() == 8) {
+        if (version.size() >= 2 && version.get(0) == 1 && version.get(1) == 8) {
             // for Java 8 there is ambiguity since both 1.8 and 8 are supported,
             // so we rewrite the former to the latter
             version = new ArrayList<>(version.subList(1, version.size()));
@@ -62,7 +60,7 @@ public class JavaVersion implements Comparable<JavaVersion> {
         return value.matches("^0*[0-9]+(\\.[0-9]+)*$");
     }
 
-    private final static JavaVersion CURRENT = parse(System.getProperty("java.specification.version"));
+    private static final JavaVersion CURRENT = parse(System.getProperty("java.specification.version"));
 
     public static JavaVersion current() {
         return CURRENT;

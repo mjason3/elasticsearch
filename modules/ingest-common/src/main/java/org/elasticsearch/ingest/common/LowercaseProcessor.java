@@ -20,6 +20,7 @@
 package org.elasticsearch.ingest.common;
 
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Processor that converts the content of string fields to lowercase.
@@ -30,8 +31,8 @@ public final class LowercaseProcessor extends AbstractStringProcessor {
 
     public static final String TYPE = "lowercase";
 
-    LowercaseProcessor(String processorTag, String field) {
-        super(processorTag, field);
+    LowercaseProcessor(String processorTag, String field, boolean ignoreMissing, String targetField) {
+        super(processorTag, field, ignoreMissing, targetField);
     }
 
     @Override
@@ -44,15 +45,16 @@ public final class LowercaseProcessor extends AbstractStringProcessor {
         return TYPE;
     }
 
-    public final static class Factory extends AbstractStringProcessor.Factory<LowercaseProcessor> {
+    public static final class Factory extends AbstractStringProcessor.Factory {
 
         public Factory() {
             super(TYPE);
         }
 
         @Override
-        protected LowercaseProcessor newProcessor(String tag, String field) {
-            return new LowercaseProcessor(tag, field);
+        protected LowercaseProcessor newProcessor(String tag, Map<String, Object> config, String field,
+                                                  boolean ignoreMissing, String targetField) {
+            return new LowercaseProcessor(tag, field, ignoreMissing, targetField);
         }
     }
 }

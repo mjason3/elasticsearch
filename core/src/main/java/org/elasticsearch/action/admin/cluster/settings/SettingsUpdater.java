@@ -67,17 +67,25 @@ final class SettingsUpdater {
             .transientSettings(transientSettings.build());
 
         ClusterBlocks.Builder blocks = ClusterBlocks.builder().blocks(currentState.blocks());
-        boolean updatedReadOnly = MetaData.SETTING_READ_ONLY_SETTING.get(metaData.persistentSettings()) || MetaData.SETTING_READ_ONLY_SETTING.get(metaData.transientSettings());
+        boolean updatedReadOnly = MetaData.SETTING_READ_ONLY_SETTING.get(metaData.persistentSettings())
+            || MetaData.SETTING_READ_ONLY_SETTING.get(metaData.transientSettings());
         if (updatedReadOnly) {
             blocks.addGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
         } else {
             blocks.removeGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
         }
+        boolean updatedReadOnlyAllowDelete = MetaData.SETTING_READ_ONLY_ALLOW_DELETE_SETTING.get(metaData.persistentSettings())
+            || MetaData.SETTING_READ_ONLY_ALLOW_DELETE_SETTING.get(metaData.transientSettings());
+        if (updatedReadOnlyAllowDelete) {
+            blocks.addGlobalBlock(MetaData.CLUSTER_READ_ONLY_ALLOW_DELETE_BLOCK);
+        } else {
+            blocks.removeGlobalBlock(MetaData.CLUSTER_READ_ONLY_ALLOW_DELETE_BLOCK);
+        }
         ClusterState build = builder(currentState).metaData(metaData).blocks(blocks).build();
         Settings settings = build.metaData().settings();
         // now we try to apply things and if they are invalid we fail
         // this dryRun will validate & parse settings but won't actually apply them.
-        clusterSettings.dryRun(settings);
+        clusterSettings.validateUpdate(settings);
         return build;
     }
 

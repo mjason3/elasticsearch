@@ -19,15 +19,21 @@
 
 package org.elasticsearch.search.suggest;
 
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.index.IndexRequestBuilder;
-import org.elasticsearch.action.search.ReduceSearchPhaseException;
 import org.elasticsearch.action.search.SearchPhaseExecutionException;
 import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.plugins.ScriptPlugin;
+import org.elasticsearch.script.ExecutableScript;
+import org.elasticsearch.script.ScriptContext;
+import org.elasticsearch.script.ScriptEngine;
+import org.elasticsearch.script.TemplateScript;
 import org.elasticsearch.search.suggest.phrase.DirectCandidateGeneratorBuilder;
 import org.elasticsearch.search.suggest.phrase.Laplace;
 import org.elasticsearch.search.suggest.phrase.LinearInterpolation;
@@ -42,6 +48,7 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -57,6 +64,7 @@ import static org.elasticsearch.search.suggest.SuggestBuilders.termSuggestion;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSuggestion;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSuggestionPhraseCollateMatchExists;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSuggestionSize;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertThrows;
 import static org.hamcrest.Matchers.anyOf;
@@ -130,7 +138,7 @@ public class SuggestSearchIT extends ESIntegTestCase {
         try {
             searchSuggest("test", termSuggest);
             fail(" can not suggest across multiple indices with different analysis chains");
-        } catch (ReduceSearchPhaseException ex) {
+        } catch (SearchPhaseExecutionException ex) {
             assertThat(ex.getCause(), instanceOf(IllegalStateException.class));
             assertThat(ex.getCause().getMessage(),
                     anyOf(endsWith("Suggest entries have different sizes actual [1] expected [2]"),
@@ -149,7 +157,7 @@ public class SuggestSearchIT extends ESIntegTestCase {
         try {
             searchSuggest("test", termSuggest);
             fail(" can not suggest across multiple indices with different analysis chains");
-        } catch (ReduceSearchPhaseException ex) {
+        } catch (SearchPhaseExecutionException ex) {
             assertThat(ex.getCause(), instanceOf(IllegalStateException.class));
             assertThat(ex.getCause().getMessage(), anyOf(endsWith("Suggest entries have different text actual [ABCD] expected [abcd]"),
                     endsWith("Suggest entries have different text actual [abcd] expected [ABCD]")));
@@ -218,9 +226,7 @@ public class SuggestSearchIT extends ESIntegTestCase {
 
     // see #2729
     public void testSizeOneShard() throws Exception {
-        prepareCreate("test").setSettings(
-                SETTING_NUMBER_OF_SHARDS, 1,
-                SETTING_NUMBER_OF_REPLICAS, 0).get();
+        prepareCreate("test").setSettings(Settings.builder().put(SETTING_NUMBER_OF_SHARDS, 1).put(SETTING_NUMBER_OF_REPLICAS, 0)).get();
         ensureGreen();
 
         for (int i = 0; i < 15; i++) {
@@ -437,8 +443,6 @@ public class SuggestSearchIT extends ESIntegTestCase {
     public void testPrefixLength() throws IOException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(Settings.builder()
                 .put(SETTING_NUMBER_OF_SHARDS, 1)
-                .put("index.analysis.analyzer.reverse.tokenizer", "standard")
-                .putArray("index.analysis.analyzer.reverse.filter", "lowercase", "reverse")
                 .put("index.analysis.analyzer.body.tokenizer", "standard")
                 .putArray("index.analysis.analyzer.body.filter", "lowercase")
                 .put("index.analysis.analyzer.bigram.tokenizer", "standard")
@@ -448,10 +452,8 @@ public class SuggestSearchIT extends ESIntegTestCase {
                 .put("index.analysis.filter.my_shingle.min_shingle_size", 2)
                 .put("index.analysis.filter.my_shingle.max_shingle_size", 2));
         XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
-                .startObject("_all").field("store", true).field("term_vector", "with_positions_offsets").endObject()
                 .startObject("properties")
                 .startObject("body").field("type", "text").field("analyzer", "body").endObject()
-                .startObject("body_reverse").field("type", "text").field("analyzer", "reverse").endObject()
                 .startObject("bigram").field("type", "text").field("analyzer", "bigram").endObject()
                 .endObject()
                 .endObject().endObject();
@@ -479,8 +481,6 @@ public class SuggestSearchIT extends ESIntegTestCase {
     public void testBasicPhraseSuggest() throws IOException, URISyntaxException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(Settings.builder()
                 .put(indexSettings())
-                .put("index.analysis.analyzer.reverse.tokenizer", "standard")
-                .putArray("index.analysis.analyzer.reverse.filter", "lowercase", "reverse")
                 .put("index.analysis.analyzer.body.tokenizer", "standard")
                 .putArray("index.analysis.analyzer.body.filter", "lowercase")
                 .put("index.analysis.analyzer.bigram.tokenizer", "standard")
@@ -491,19 +491,11 @@ public class SuggestSearchIT extends ESIntegTestCase {
                 .put("index.analysis.filter.my_shingle.max_shingle_size", 2)
                 .put("index.number_of_shards", 1));
         XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
-                    .startObject("_all")
-                        .field("store", true)
-                        .field("term_vector", "with_positions_offsets")
-                    .endObject()
                     .startObject("properties")
                         .startObject("body").
                             field("type", "text").
                             field("analyzer", "body")
                         .endObject()
-                        .startObject("body_reverse").
-                            field("type", "text").
-                            field("analyzer", "reverse")
-                         .endObject()
                          .startObject("bigram").
                              field("type", "text").
                              field("analyzer", "bigram")
@@ -533,7 +525,7 @@ public class SuggestSearchIT extends ESIntegTestCase {
             "Police sergeant who stops the film",
         };
         for (String line : strings) {
-            index("test", "type1", line, "body", line, "body_reverse", line, "bigram", line);
+            index("test", "type1", line, "body", line, "bigram", line);
         }
         refresh();
 
@@ -571,14 +563,6 @@ public class SuggestSearchIT extends ESIntegTestCase {
         // pass in a correct phrase - set confidence to 0.99
         phraseSuggest.confidence(0.99f);
         searchSuggest = searchSuggest( "Arthur, King of the Britons", "simple_phrase", phraseSuggest);
-        assertSuggestion(searchSuggest, 0, "simple_phrase", "arthur king of the britons");
-
-        //test reverse suggestions with pre & post filter
-        phraseSuggest
-            .addCandidateGenerator(candidateGenerator("body").minWordLength(1).suggestMode("always"))
-            .addCandidateGenerator(candidateGenerator("body_reverse").minWordLength(1).suggestMode("always").preFilter("reverse")
-                .postFilter("reverse"));
-        searchSuggest = searchSuggest( "Artur, Ging of the Britons",  "simple_phrase", phraseSuggest);
         assertSuggestion(searchSuggest, 0, "simple_phrase", "arthur king of the britons");
 
         // set all mass to trigrams (not indexed)
@@ -630,8 +614,6 @@ public class SuggestSearchIT extends ESIntegTestCase {
     public void testSizeParam() throws IOException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(Settings.builder()
                 .put(SETTING_NUMBER_OF_SHARDS, 1)
-                .put("index.analysis.analyzer.reverse.tokenizer", "standard")
-                .putArray("index.analysis.analyzer.reverse.filter", "lowercase", "reverse")
                 .put("index.analysis.analyzer.body.tokenizer", "standard")
                 .putArray("index.analysis.analyzer.body.filter", "lowercase")
                 .put("index.analysis.analyzer.bigram.tokenizer", "standard")
@@ -644,19 +626,11 @@ public class SuggestSearchIT extends ESIntegTestCase {
         XContentBuilder mapping = XContentFactory.jsonBuilder()
                 .startObject()
                     .startObject("type1")
-                        .startObject("_all")
-                            .field("store", true)
-                            .field("term_vector", "with_positions_offsets")
-                        .endObject()
                         .startObject("properties")
                             .startObject("body")
                                 .field("type", "text")
                                 .field("analyzer", "body")
                             .endObject()
-                         .startObject("body_reverse")
-                             .field("type", "text")
-                             .field("analyzer", "reverse")
-                         .endObject()
                          .startObject("bigram")
                              .field("type", "text")
                              .field("analyzer", "bigram")
@@ -668,9 +642,9 @@ public class SuggestSearchIT extends ESIntegTestCase {
         ensureGreen();
 
         String line = "xorr the god jewel";
-        index("test", "type1", "1", "body", line, "body_reverse", line, "bigram", line);
+        index("test", "type1", "1", "body", line, "bigram", line);
         line = "I got it this time";
-        index("test", "type1", "2", "body", line, "body_reverse", line, "bigram", line);
+        index("test", "type1", "2", "body", line, "bigram", line);
         refresh();
 
         PhraseSuggestionBuilder phraseSuggestion = phraseSuggestion("bigram")
@@ -691,108 +665,6 @@ public class SuggestSearchIT extends ESIntegTestCase {
                     .accuracy(0.1f));
         searchSuggest = searchSuggest( "Xorr the Gut-Jewel", "simple_phrase", phraseSuggestion);
         assertSuggestion(searchSuggest, 0, "simple_phrase", "xorr the god jewel");
-    }
-
-    public void testPhraseBoundaryCases() throws IOException, URISyntaxException {
-        CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(Settings.builder()
-                .put(indexSettings()).put(SETTING_NUMBER_OF_SHARDS, 1) // to get reliable statistics we should put this all into one shard
-                .put("index.analysis.analyzer.body.tokenizer", "standard")
-                .putArray("index.analysis.analyzer.body.filter", "lowercase")
-                .put("index.analysis.analyzer.bigram.tokenizer", "standard")
-                .putArray("index.analysis.analyzer.bigram.filter", "my_shingle", "lowercase")
-                .put("index.analysis.analyzer.ngram.tokenizer", "standard")
-                .putArray("index.analysis.analyzer.ngram.filter", "my_shingle2", "lowercase")
-                .put("index.analysis.analyzer.myDefAnalyzer.tokenizer", "standard")
-                .putArray("index.analysis.analyzer.myDefAnalyzer.filter", "shingle", "lowercase")
-                .put("index.analysis.filter.my_shingle.type", "shingle")
-                .put("index.analysis.filter.my_shingle.output_unigrams", false)
-                .put("index.analysis.filter.my_shingle.min_shingle_size", 2)
-                .put("index.analysis.filter.my_shingle.max_shingle_size", 2)
-                .put("index.analysis.filter.my_shingle2.type", "shingle")
-                .put("index.analysis.filter.my_shingle2.output_unigrams", true)
-                .put("index.analysis.filter.my_shingle2.min_shingle_size", 2)
-                .put("index.analysis.filter.my_shingle2.max_shingle_size", 2));
-
-        XContentBuilder mapping = XContentFactory.jsonBuilder()
-                    .startObject().startObject("type1")
-                    .startObject("_all").field("store", true).field("term_vector", "with_positions_offsets").endObject()
-                .startObject("properties")
-                .startObject("body").field("type", "text").field("analyzer", "body").endObject()
-                .startObject("bigram").field("type", "text").field("analyzer", "bigram").endObject()
-                .startObject("ngram").field("type", "text").field("analyzer", "ngram").endObject()
-                .endObject()
-                .endObject().endObject();
-        assertAcked(builder.addMapping("type1", mapping));
-        ensureGreen();
-
-        String[] strings = new String[]{
-            "Xorr the God-Jewel",
-            "Grog the God-Crusher",
-            "Xorn",
-            "Walter Newell",
-            "Wanda Maximoff",
-            "Captain America",
-            "American Ace",
-            "Wundarr the Aquarian",
-            "Will o' the Wisp",
-            "Xemnu the Titan"
-        };
-        for (String line : strings) {
-            index("test", "type1", line, "body", line, "bigram", line, "ngram", line);
-        }
-        refresh();
-
-        NumShards numShards = getNumShards("test");
-
-        // Lets make sure some things throw exceptions
-        PhraseSuggestionBuilder phraseSuggestion = phraseSuggestion("bigram")
-                .analyzer("body")
-                .addCandidateGenerator(candidateGenerator("does_not_exist").minWordLength(1).suggestMode("always"))
-                .realWordErrorLikelihood(0.95f)
-                .maxErrors(0.5f)
-                .size(1);
-        phraseSuggestion.clearCandidateGenerators().analyzer(null);
-        try {
-            searchSuggest("xor the got-jewel", numShards.numPrimaries, Collections.singletonMap("simple_phrase", phraseSuggestion));
-            fail("analyzer does only produce ngrams");
-        } catch (SearchPhaseExecutionException e) {
-        }
-
-        phraseSuggestion.analyzer("bigram");
-        try {
-            searchSuggest("xor the got-jewel", numShards.numPrimaries, Collections.singletonMap("simple_phrase", phraseSuggestion));
-            fail("analyzer does only produce ngrams");
-        } catch (SearchPhaseExecutionException e) {
-        }
-
-        // Now we'll make sure some things don't
-        phraseSuggestion.forceUnigrams(false);
-        searchSuggest( "xor the got-jewel", 0, Collections.singletonMap("simple_phrase", phraseSuggestion));
-
-        // Field doesn't produce unigrams but the analyzer does
-        phraseSuggestion.forceUnigrams(true).analyzer("ngram");
-        searchSuggest( "xor the got-jewel", 0, Collections.singletonMap("simple_phrase", phraseSuggestion));
-
-        phraseSuggestion = phraseSuggestion("ngram")
-                .analyzer("myDefAnalyzer")
-                .forceUnigrams(true)
-                .realWordErrorLikelihood(0.95f)
-                .maxErrors(0.5f)
-                .size(1)
-                .addCandidateGenerator(candidateGenerator("body").minWordLength(1).suggestMode("always"));
-        Suggest suggest = searchSuggest( "xor the got-jewel", 0, Collections.singletonMap("simple_phrase", phraseSuggestion));
-
-        // "xorr the god jewel" and and "xorn the god jewel" have identical scores (we are only using unigrams to score), so we tie break by
-        // earlier term (xorn):
-        assertSuggestion(suggest, 0, "simple_phrase", "xorn the god jewel");
-
-        phraseSuggestion.analyzer(null);
-        suggest = searchSuggest( "xor the got-jewel", 0, Collections.singletonMap("simple_phrase", phraseSuggestion));
-
-        // In this case xorr has a better score than xorn because we set the field back to the default (my_shingle2) analyzer, so the
-        // probability that the term is not in the dictionary but is NOT a misspelling is relatively high in this case compared to the
-        // others that have no n-gram with the other terms in the phrase :) you can set this realWorldErrorLikelyhood
-        assertSuggestion(suggest, 0, "simple_phrase", "xorr the god jewel");
     }
 
     public void testDifferentShardSize() throws Exception {
@@ -880,8 +752,8 @@ public class SuggestSearchIT extends ESIntegTestCase {
                 .put("index.analysis.filter.shingler.output_unigrams", true)).addMapping("type1", mappingBuilder));
         ensureGreen();
 
-        index("test", "type2", "1", "foo", "bar");
-        index("test", "type2", "2", "foo", "bar");
+        index("test", "type1", "11", "foo", "bar");
+        index("test", "type1", "12", "foo", "bar");
         index("test", "type1", "1", "name", "Just testing the suggestions api");
         index("test", "type1", "2", "name", "An other title about equal length");
         refresh();
@@ -918,10 +790,6 @@ public class SuggestSearchIT extends ESIntegTestCase {
         XContentBuilder mapping = XContentFactory.jsonBuilder()
                 .startObject()
                     .startObject("type1")
-                        .startObject("_all")
-                            .field("store", true)
-                            .field("term_vector", "with_positions_offsets")
-                        .endObject()
                         .startObject("properties")
                             .startObject("body")
                                 .field("type", "text")
@@ -1106,6 +974,211 @@ public class SuggestSearchIT extends ESIntegTestCase {
         long total = System.currentTimeMillis() - start;
         assertSuggestion(searchSuggest, 0, 0, "title", "united states house of representatives elections in washington 2006");
         // assertThat(total, lessThan(1000L)); // Takes many seconds without fix - just for debugging
+    }
+
+    @Override
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return Collections.singleton(DummyTemplatePlugin.class);
+    }
+
+    public static class DummyTemplatePlugin extends Plugin implements ScriptPlugin {
+        @Override
+        public ScriptEngine getScriptEngine(Settings settings, Collection<ScriptContext<?>> contexts) {
+            return new DummyTemplateScriptEngine();
+        }
+    }
+
+    public static class DummyTemplateScriptEngine implements ScriptEngine {
+
+        // The collate query setter is hard coded to use mustache, so lets lie in this test about the script plugin,
+        // which makes the collate code thinks mustache is evaluating the query.
+        public static final String NAME = "mustache";
+
+        @Override
+        public String getType() {
+            return NAME;
+        }
+
+        @Override
+        public <T> T compile(String scriptName, String scriptSource, ScriptContext<T> context, Map<String, String> params) {
+            if (context.instanceClazz != TemplateScript.class) {
+                throw new UnsupportedOperationException();
+            }
+            TemplateScript.Factory factory = p -> {
+                String script = scriptSource;
+                for (Entry<String, Object> entry : p.entrySet()) {
+                    script = script.replace("{{" + entry.getKey() + "}}", String.valueOf(entry.getValue()));
+                }
+                String result = script;
+                return new TemplateScript(null) {
+                    @Override
+                    public String execute() {
+                        return result;
+                    }
+                };
+            };
+            return context.factoryClazz.cast(factory);
+        }
+    }
+
+    public void testPhraseSuggesterCollate() throws InterruptedException, ExecutionException, IOException {
+        CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(Settings.builder()
+                .put(indexSettings())
+                .put(SETTING_NUMBER_OF_SHARDS, 1) // A single shard will help to keep the tests repeatable.
+                .put("index.analysis.analyzer.text.tokenizer", "standard")
+                .putArray("index.analysis.analyzer.text.filter", "lowercase", "my_shingle")
+                .put("index.analysis.filter.my_shingle.type", "shingle")
+                .put("index.analysis.filter.my_shingle.output_unigrams", true)
+                .put("index.analysis.filter.my_shingle.min_shingle_size", 2)
+                .put("index.analysis.filter.my_shingle.max_shingle_size", 3));
+
+        XContentBuilder mapping = XContentFactory.jsonBuilder()
+                .startObject()
+                .startObject("type1")
+                .startObject("properties")
+                .startObject("title")
+                .field("type", "text")
+                .field("analyzer", "text")
+                .endObject()
+                .endObject()
+                .endObject()
+                .endObject();
+        assertAcked(builder.addMapping("type1", mapping));
+        ensureGreen();
+
+        List<String> titles = new ArrayList<>();
+
+        titles.add("United States House of Representatives Elections in Washington 2006");
+        titles.add("United States House of Representatives Elections in Washington 2005");
+        titles.add("State");
+        titles.add("Houses of Parliament");
+        titles.add("Representative Government");
+        titles.add("Election");
+
+        List<IndexRequestBuilder> builders = new ArrayList<>();
+        for (String title: titles) {
+            builders.add(client().prepareIndex("test", "type1").setSource("title", title));
+        }
+        indexRandom(true, builders);
+
+        // suggest without collate
+        PhraseSuggestionBuilder suggest = phraseSuggestion("title")
+                .addCandidateGenerator(new DirectCandidateGeneratorBuilder("title")
+                        .suggestMode("always")
+                        .maxTermFreq(.99f)
+                        .size(10)
+                        .maxInspections(200)
+                )
+                .confidence(0f)
+                .maxErrors(2f)
+                .shardSize(30000)
+                .size(10);
+        Suggest searchSuggest = searchSuggest("united states house of representatives elections in washington 2006", "title", suggest);
+        assertSuggestionSize(searchSuggest, 0, 10, "title");
+
+        // suggest with collate
+        String filterString = XContentFactory.jsonBuilder()
+                .startObject()
+                .startObject("match_phrase")
+                .field("{{field}}", "{{suggestion}}")
+                .endObject()
+                .endObject()
+                .string();
+        PhraseSuggestionBuilder filteredQuerySuggest = suggest.collateQuery(filterString);
+        filteredQuerySuggest.collateParams(Collections.singletonMap("field", "title"));
+        searchSuggest = searchSuggest("united states house of representatives elections in washington 2006", "title", filteredQuerySuggest);
+        assertSuggestionSize(searchSuggest, 0, 2, "title");
+
+        // collate suggest with no result (boundary case)
+        searchSuggest = searchSuggest("Elections of Representatives Parliament", "title", filteredQuerySuggest);
+        assertSuggestionSize(searchSuggest, 0, 0, "title");
+
+        NumShards numShards = getNumShards("test");
+
+        // collate suggest with bad query
+        String incorrectFilterString = XContentFactory.jsonBuilder()
+                .startObject()
+                .startObject("test")
+                .field("title", "{{suggestion}}")
+                .endObject()
+                .endObject()
+                .string();
+        PhraseSuggestionBuilder incorrectFilteredSuggest = suggest.collateQuery(incorrectFilterString);
+        Map<String, SuggestionBuilder<?>> namedSuggestion = new HashMap<>();
+        namedSuggestion.put("my_title_suggestion", incorrectFilteredSuggest);
+        try {
+            searchSuggest("united states house of representatives elections in washington 2006", numShards.numPrimaries, namedSuggestion);
+            fail("Post query error has been swallowed");
+        } catch(ElasticsearchException e) {
+            // expected
+        }
+
+        // suggest with collation
+        String filterStringAsFilter = XContentFactory.jsonBuilder()
+                .startObject()
+                .startObject("match_phrase")
+                .field("title", "{{suggestion}}")
+                .endObject()
+                .endObject()
+                .string();
+
+        PhraseSuggestionBuilder filteredFilterSuggest = suggest.collateQuery(filterStringAsFilter);
+        searchSuggest = searchSuggest("united states house of representatives elections in washington 2006", "title",
+                filteredFilterSuggest);
+        assertSuggestionSize(searchSuggest, 0, 2, "title");
+
+        // collate suggest with bad query
+        String filterStr = XContentFactory.jsonBuilder()
+                .startObject()
+                .startObject("pprefix")
+                .field("title", "{{suggestion}}")
+                .endObject()
+                .endObject()
+                .string();
+
+        PhraseSuggestionBuilder in = suggest.collateQuery(filterStr);
+        try {
+            searchSuggest("united states house of representatives elections in washington 2006", numShards.numPrimaries, namedSuggestion);
+            fail("Post filter error has been swallowed");
+        } catch(ElasticsearchException e) {
+            //expected
+        }
+
+        // collate script failure due to no additional params
+        String collateWithParams = XContentFactory.jsonBuilder()
+                .startObject()
+                .startObject("{{query_type}}")
+                .field("{{query_field}}", "{{suggestion}}")
+                .endObject()
+                .endObject()
+                .string();
+
+
+        PhraseSuggestionBuilder phraseSuggestWithNoParams = suggest.collateQuery(collateWithParams);
+        try {
+            searchSuggest("united states house of representatives elections in washington 2006", numShards.numPrimaries, namedSuggestion);
+            fail("Malformed query (lack of additional params) should fail");
+        } catch (ElasticsearchException e) {
+            // expected
+        }
+
+        // collate script with additional params
+        Map<String, Object> params = new HashMap<>();
+        params.put("query_type", "match_phrase");
+        params.put("query_field", "title");
+
+        PhraseSuggestionBuilder phraseSuggestWithParams = suggest.collateQuery(collateWithParams).collateParams(params);
+        searchSuggest = searchSuggest("united states house of representatives elections in washington 2006", "title",
+                phraseSuggestWithParams);
+        assertSuggestionSize(searchSuggest, 0, 2, "title");
+
+        // collate query request with prune set to true
+        PhraseSuggestionBuilder phraseSuggestWithParamsAndReturn = suggest.collateQuery(collateWithParams).collateParams(params)
+                .collatePrune(true);
+        searchSuggest = searchSuggest("united states house of representatives elections in washington 2006", "title",
+                phraseSuggestWithParamsAndReturn);
+        assertSuggestionSize(searchSuggest, 0, 10, "title");
+        assertSuggestionPhraseCollateMatchExists(searchSuggest, "title", 2);
     }
 
     protected Suggest searchSuggest(String name, SuggestionBuilder<?> suggestion) {

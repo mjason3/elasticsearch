@@ -22,7 +22,6 @@ package org.elasticsearch.action.search;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.CompositeIndicesRequest;
-import org.elasticsearch.action.IndicesRequest;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -36,7 +35,7 @@ import static org.elasticsearch.action.ValidateActions.addValidationError;
 /**
  * A multi search API request.
  */
-public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> implements CompositeIndicesRequest {
+public class MultiSearchRequest extends ActionRequest implements CompositeIndicesRequest {
 
     private int maxConcurrentSearchRequests = 0;
     private List<SearchRequest> requests = new ArrayList<>();
@@ -85,11 +84,6 @@ public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> implem
     }
 
     @Override
-    public List<? extends IndicesRequest> subRequests() {
-        return this.requests;
-    }
-
-    @Override
     public ActionRequestValidationException validate() {
         ActionRequestValidationException validationException = null;
         if (requests.isEmpty()) {
@@ -123,8 +117,7 @@ public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> implem
         maxConcurrentSearchRequests = in.readVInt();
         int size = in.readVInt();
         for (int i = 0; i < size; i++) {
-            SearchRequest request = new SearchRequest();
-            request.readFrom(in);
+            SearchRequest request = new SearchRequest(in);
             requests.add(request);
         }
     }

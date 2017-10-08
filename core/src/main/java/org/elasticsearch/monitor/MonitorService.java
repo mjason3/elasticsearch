@@ -28,10 +28,11 @@ import org.elasticsearch.monitor.jvm.JvmService;
 import org.elasticsearch.monitor.os.OsService;
 import org.elasticsearch.monitor.process.ProcessService;
 import org.elasticsearch.threadpool.ThreadPool;
+import org.elasticsearch.cluster.ClusterInfoService;
 
 import java.io.IOException;
 
-public class MonitorService extends AbstractLifecycleComponent<MonitorService> {
+public class MonitorService extends AbstractLifecycleComponent {
 
     private final JvmGcMonitorService jvmGcMonitorService;
     private final OsService osService;
@@ -39,13 +40,14 @@ public class MonitorService extends AbstractLifecycleComponent<MonitorService> {
     private final JvmService jvmService;
     private final FsService fsService;
 
-    public MonitorService(Settings settings, NodeEnvironment nodeEnvironment, ThreadPool threadPool) throws IOException {
+    public MonitorService(Settings settings, NodeEnvironment nodeEnvironment, ThreadPool threadPool,
+                          ClusterInfoService clusterInfoService) throws IOException {
         super(settings);
         this.jvmGcMonitorService = new JvmGcMonitorService(settings, threadPool);
         this.osService = new OsService(settings);
         this.processService = new ProcessService(settings);
         this.jvmService = new JvmService(settings);
-        this.fsService = new FsService(settings, nodeEnvironment);
+        this.fsService = new FsService(settings, nodeEnvironment, clusterInfoService);
     }
 
     public OsService osService() {

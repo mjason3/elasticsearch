@@ -21,23 +21,23 @@ package org.elasticsearch.client.transport;
 
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
-import org.elasticsearch.action.support.PlainListenableActionFuture;
+import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterState;
+import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.env.Environment;
-import org.elasticsearch.node.Node;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
 import org.elasticsearch.test.ESIntegTestCase.Scope;
+import org.elasticsearch.transport.MockTransportClient;
 import org.elasticsearch.transport.TransportService;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 
-import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 
 @ClusterScope(scope = Scope.TEST, numClientNodes = 0, supportsDedicatedMasters = false)
@@ -50,15 +50,17 @@ public class TransportClientRetryIT extends ESIntegTestCase {
             addresses[i++] = instance.boundAddress().publishAddress();
         }
 
+        String transport = getTestTransportType();
+
         Settings.Builder builder = Settings.builder().put("client.transport.nodes_sampler_interval", "1s")
                 .put("node.name", "transport_client_retry_test")
-                .put(Node.NODE_MODE_SETTING.getKey(), internalCluster().getNodeMode())
                 .put(ClusterName.CLUSTER_NAME_SETTING.getKey(), internalCluster().getClusterName())
+                .put(NetworkModule.TRANSPORT_TYPE_SETTING.getKey(),transport)
                 .put(Environment.PATH_HOME_SETTING.getKey(), createTempDir());
 
-        try (TransportClient client = TransportClient.builder().settings(builder.build()).build()) {
+        try (TransportClient client = new MockTransportClient(builder.build())) {
             client.addTransportAddresses(addresses);
-            assertThat(client.connectedNodes().size(), equalTo(internalCluster().size()));
+            assertEquals(client.connectedNodes().size(), internalCluster().size());
 
             int size = cluster().size();
             //kill all nodes one by one, leaving a single master/data node at the end of the loop
@@ -71,7 +73,7 @@ public class TransportClientRetryIT extends ESIntegTestCase {
                 if (randomBoolean()) {
                     clusterState = client.admin().cluster().state(clusterStateRequest).get().getState();
                 } else {
-                    PlainListenableActionFuture<ClusterStateResponse> future = new PlainListenableActionFuture<>(client.threadPool());
+                    PlainActionFuture<ClusterStateResponse> future = PlainActionFuture.newFuture();
                     client.admin().cluster().state(clusterStateRequest, future);
                     clusterState = future.get().getState();
                 }

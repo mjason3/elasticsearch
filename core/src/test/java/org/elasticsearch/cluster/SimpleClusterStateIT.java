@@ -26,15 +26,35 @@ import org.elasticsearch.client.Client;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.metadata.MappingMetaData;
+import org.elasticsearch.cluster.metadata.MetaData;
+import org.elasticsearch.cluster.routing.RoutingTable;
+import org.elasticsearch.cluster.service.ClusterService;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.UUIDs;
+import org.elasticsearch.common.collect.ImmutableOpenMap;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
+import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeValue;
+import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.index.mapper.MapperService;
+import org.elasticsearch.plugins.ClusterPlugin;
+import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.hamcrest.CollectionAssertions;
 import org.junit.Before;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertIndexTemplateExists;
@@ -47,6 +67,11 @@ import static org.hamcrest.Matchers.is;
  *
  */
 public class SimpleClusterStateIT extends ESIntegTestCase {
+
+    @Override
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return Collections.singletonList(PrivateCustomPlugin.class);
+    }
 
     @Before
     public void indexData() throws Exception {
@@ -88,20 +113,39 @@ public class SimpleClusterStateIT extends ESIntegTestCase {
 
     public void testIndexTemplates() throws Exception {
         client().admin().indices().preparePutTemplate("foo_template")
-                .setTemplate("te*")
+                .setPatterns(Collections.singletonList("te*"))
                 .setOrder(0)
-                .addMapping("type1", XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties")
-                        .startObject("field1").field("type", "text").field("store", true).endObject()
-                        .startObject("field2").field("type", "keyword").field("store", true).endObject()
-                        .endObject().endObject().endObject())
+                .addMapping("type1", XContentFactory.jsonBuilder()
+                    .startObject()
+                        .startObject("type1")
+                            .startObject("properties")
+                                .startObject("field1")
+                                    .field("type", "text")
+                                    .field("store", true)
+                                .endObject()
+                                .startObject("field2")
+                                    .field("type", "keyword")
+                                    .field("store", true)
+                                .endObject()
+                            .endObject()
+                        .endObject()
+                    .endObject())
                 .get();
 
         client().admin().indices().preparePutTemplate("fuu_template")
-                .setTemplate("test*")
+                .setPatterns(Collections.singletonList("test*"))
                 .setOrder(1)
-                .addMapping("type1", XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties")
-                        .startObject("field2").field("type", "text").field("store", "no").endObject()
-                        .endObject().endObject().endObject())
+                .addMapping("type1", XContentFactory.jsonBuilder()
+                        .startObject()
+                            .startObject("type1")
+                                .startObject("properties")
+                                    .startObject("field2")
+                                        .field("type", "text")
+                                        .field("store", false)
+                                    .endObject()
+                                .endObject()
+                            .endObject()
+                        .endObject())
                 .get();
 
         ClusterStateResponse clusterStateResponseUnfiltered = client().admin().cluster().prepareState().get();
@@ -112,18 +156,38 @@ public class SimpleClusterStateIT extends ESIntegTestCase {
     }
 
     public void testThatFilteringByIndexWorksForMetadataAndRoutingTable() throws Exception {
-        ClusterStateResponse clusterStateResponseFiltered = client().admin().cluster().prepareState().clear()
-                .setMetaData(true).setRoutingTable(true).setIndices("foo", "fuu", "non-existent").get();
+        testFilteringByIndexWorks(new String[]{"foo", "fuu", "non-existent"}, new String[]{"foo", "fuu"});
+        testFilteringByIndexWorks(new String[]{"baz"}, new String[]{"baz"});
+        testFilteringByIndexWorks(new String[]{"f*"}, new String[]{"foo", "fuu"});
+        testFilteringByIndexWorks(new String[]{"b*"}, new String[]{"baz"});
+        testFilteringByIndexWorks(new String[]{"*u"}, new String[]{"fuu"});
 
-        // metadata
-        assertThat(clusterStateResponseFiltered.getState().metaData().indices().size(), is(2));
-        assertThat(clusterStateResponseFiltered.getState().metaData().indices(), CollectionAssertions.hasKey("foo"));
-        assertThat(clusterStateResponseFiltered.getState().metaData().indices(), CollectionAssertions.hasKey("fuu"));
+        String[] randomIndices = randomFrom(new String[]{"*"}, new String[]{MetaData.ALL}, Strings.EMPTY_ARRAY, new String[]{"f*", "b*"});
+        testFilteringByIndexWorks(randomIndices, new String[]{"foo", "fuu", "baz"});
+    }
 
-        // routing table
-        assertThat(clusterStateResponseFiltered.getState().routingTable().hasIndex("foo"), is(true));
-        assertThat(clusterStateResponseFiltered.getState().routingTable().hasIndex("fuu"), is(true));
-        assertThat(clusterStateResponseFiltered.getState().routingTable().hasIndex("baz"), is(false));
+    /**
+     * Retrieves the cluster state for the given indices and then checks
+     * that the cluster state returns coherent data for both routing table and metadata.
+     */
+    private void testFilteringByIndexWorks(String[] indices, String[] expected) {
+        ClusterStateResponse clusterState = client().admin().cluster().prepareState()
+                                                                            .clear()
+                                                                            .setMetaData(true)
+                                                                            .setRoutingTable(true)
+                                                                            .setIndices(indices)
+                                                                            .get();
+
+        ImmutableOpenMap<String, IndexMetaData> metaData = clusterState.getState().getMetaData().indices();
+        assertThat(metaData.size(), is(expected.length));
+
+        RoutingTable routingTable = clusterState.getState().getRoutingTable();
+        assertThat(routingTable.indicesRouting().size(), is(expected.length));
+
+        for (String expectedIndex : expected) {
+            assertThat(metaData, CollectionAssertions.hasKey(expectedIndex));
+            assertThat(routingTable.hasIndex(expectedIndex), is(true));
+        }
     }
 
     public void testLargeClusterStatePublishing() throws Exception {
@@ -146,9 +210,10 @@ public class SimpleClusterStateIT extends ESIntegTestCase {
         int numberOfShards = scaledRandomIntBetween(1, cluster().numDataNodes());
         // if the create index is ack'ed, then all nodes have successfully processed the cluster state
         assertAcked(client().admin().indices().prepareCreate("test")
-                .setSettings(IndexMetaData.SETTING_NUMBER_OF_SHARDS, numberOfShards,
-                        IndexMetaData.SETTING_NUMBER_OF_REPLICAS, 0,
-                        MapperService.INDEX_MAPPING_TOTAL_FIELDS_LIMIT_SETTING.getKey(), Long.MAX_VALUE)
+                .setSettings(Settings.builder()
+                        .put(IndexMetaData.SETTING_NUMBER_OF_SHARDS, numberOfShards)
+                        .put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS, 0)
+                        .put(MapperService.INDEX_MAPPING_TOTAL_FIELDS_LIMIT_SETTING.getKey(), Long.MAX_VALUE))
                 .addMapping("type", mapping)
                 .setTimeout("60s").get());
         ensureGreen(); // wait for green state, so its both green, and there are no more pending events
@@ -211,6 +276,69 @@ public class SimpleClusterStateIT extends ESIntegTestCase {
             fail("Expected IndexNotFoundException");
         } catch (IndexNotFoundException e) {
             assertThat(e.getMessage(), is("no such index"));
+        }
+    }
+
+    public void testPrivateCustomsAreExcluded() {
+        ClusterStateResponse clusterStateResponse = client().admin().cluster().prepareState().setCustoms(true).get();
+        assertFalse(clusterStateResponse.getState().customs().containsKey("test"));
+        // just to make sure there is something
+        assertTrue(clusterStateResponse.getState().customs().containsKey(SnapshotDeletionsInProgress.TYPE));
+        ClusterState state = internalCluster().getInstance(ClusterService.class).state();
+        assertTrue(state.customs().containsKey("test"));
+    }
+
+    private static class TestCustom extends AbstractNamedDiffable<ClusterState.Custom> implements ClusterState.Custom {
+
+        private final int value;
+
+        TestCustom(int value) {
+            this.value = value;
+        }
+
+        TestCustom(StreamInput in) throws IOException {
+            this.value = in.readInt();
+        }
+        @Override
+        public String getWriteableName() {
+            return "test";
+        }
+
+        @Override
+        public void writeTo(StreamOutput out) throws IOException {
+            out.writeInt(value);
+        }
+
+        @Override
+        public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+            return builder;
+        }
+
+        static NamedDiff<ClusterState.Custom> readDiffFrom(StreamInput in) throws IOException {
+            return readDiffFrom(ClusterState.Custom.class, "test", in);
+        }
+
+        @Override
+        public boolean isPrivate() {
+            return true;
+        }
+    }
+
+    public static class PrivateCustomPlugin extends Plugin implements ClusterPlugin {
+
+        public PrivateCustomPlugin() {}
+
+        @Override
+        public Map<String, Supplier<ClusterState.Custom>> getInitialClusterStateCustomSupplier() {
+            return Collections.singletonMap("test", () -> new TestCustom(1));
+        }
+
+        @Override
+        public List<NamedWriteableRegistry.Entry> getNamedWriteables() {
+            List<NamedWriteableRegistry.Entry> entries = new ArrayList<>();
+            entries.add(new NamedWriteableRegistry.Entry(ClusterState.Custom.class, "test", TestCustom::new));
+            entries.add(new NamedWriteableRegistry.Entry(NamedDiff.class, "test", TestCustom::readDiffFrom));
+            return entries;
         }
     }
 }

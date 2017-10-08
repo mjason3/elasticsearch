@@ -22,23 +22,16 @@ package org.elasticsearch.index.mapper;
 import com.carrotsearch.hppc.ObjectObjectHashMap;
 import com.carrotsearch.hppc.ObjectObjectMap;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.Nullable;
-import org.elasticsearch.common.lucene.all.AllEntries;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.analysis.AnalysisService;
-import org.elasticsearch.index.mapper.object.RootObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-/**
- *
- */
 public abstract class ParseContext {
 
     /** Fork of {@link org.apache.lucene.document.Document} with additional functionality. */
@@ -244,11 +237,6 @@ public abstract class ParseContext {
         }
 
         @Override
-        public AnalysisService analysisService() {
-            return in.analysisService();
-        }
-
-        @Override
         public MapperService mapperService() {
             return in.mapperService();
         }
@@ -264,8 +252,13 @@ public abstract class ParseContext {
         }
 
         @Override
-        public AllEntries allEntries() {
-            return in.allEntries();
+        public SeqNoFieldMapper.SequenceIDFields seqID() {
+            return in.seqID();
+        }
+
+        @Override
+        public void seqID(SeqNoFieldMapper.SequenceIDFields seqID) {
+            in.seqID(seqID);
         }
 
         @Override
@@ -310,9 +303,8 @@ public abstract class ParseContext {
 
         private Field version;
 
-        private StringBuilder stringBuilder = new StringBuilder();
+        private SeqNoFieldMapper.SequenceIDFields seqID;
 
-        private final AllEntries allEntries;
 
         private final List<Mapper> dynamicMappers;
 
@@ -328,7 +320,6 @@ public abstract class ParseContext {
             this.documents.add(document);
             this.version = null;
             this.sourceToParse = source;
-            this.allEntries = new AllEntries();
             this.dynamicMappers = new ArrayList<>();
         }
 
@@ -389,11 +380,6 @@ public abstract class ParseContext {
         }
 
         @Override
-        public AnalysisService analysisService() {
-            return docMapperParser.analysisService;
-        }
-
-        @Override
         public MapperService mapperService() {
             return docMapperParser.mapperService;
         }
@@ -409,8 +395,13 @@ public abstract class ParseContext {
         }
 
         @Override
-        public AllEntries allEntries() {
-            return this.allEntries;
+        public SeqNoFieldMapper.SequenceIDFields seqID() {
+            return this.seqID;
+        }
+
+        @Override
+        public void seqID(SeqNoFieldMapper.SequenceIDFields seqID) {
+            this.seqID = seqID;
         }
 
         @Override
@@ -512,41 +503,15 @@ public abstract class ParseContext {
 
     public abstract DocumentMapper docMapper();
 
-    public abstract AnalysisService analysisService();
-
     public abstract MapperService mapperService();
 
     public abstract Field version();
 
     public abstract void version(Field version);
 
-    public final boolean includeInAll(Boolean includeInAll, FieldMapper mapper) {
-        return includeInAll(includeInAll, mapper.fieldType().indexOptions() != IndexOptions.NONE);
-    }
+    public abstract SeqNoFieldMapper.SequenceIDFields seqID();
 
-    /**
-     * Is all included or not. Will always disable it if {@link org.elasticsearch.index.mapper.internal.AllFieldMapper#enabled()}
-     * is <tt>false</tt>. If its enabled, then will return <tt>true</tt> only if the specific flag is <tt>null</tt> or
-     * its actual value (so, if not set, defaults to "true") and the field is indexed.
-     */
-    private boolean includeInAll(Boolean specificIncludeInAll, boolean indexed) {
-        if (isWithinCopyTo()) {
-            return false;
-        }
-        if (isWithinMultiFields()) {
-            return false;
-        }
-        if (!docMapper().allFieldMapper().enabled()) {
-            return false;
-        }
-        // not explicitly set
-        if (specificIncludeInAll == null) {
-            return indexed;
-        }
-        return specificIncludeInAll;
-    }
-
-    public abstract AllEntries allEntries();
+    public abstract void seqID(SeqNoFieldMapper.SequenceIDFields seqID);
 
     /**
      * Return a new context that will have the external value set.

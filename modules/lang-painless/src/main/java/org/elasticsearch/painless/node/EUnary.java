@@ -22,7 +22,6 @@ package org.elasticsearch.painless.node;
 import org.elasticsearch.painless.Definition;
 import org.elasticsearch.painless.Globals;
 import org.elasticsearch.painless.Location;
-import org.elasticsearch.painless.Definition.Sort;
 import org.elasticsearch.painless.Definition.Type;
 import org.elasticsearch.painless.AnalyzerCaster;
 import org.elasticsearch.painless.DefBootstrap;
@@ -34,16 +33,18 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.elasticsearch.painless.MethodWriter;
+import org.objectweb.asm.Opcodes;
 
 /**
  * Represents a unary math expression.
  */
 public final class EUnary extends AExpression {
 
-    final Operation operation;
-    AExpression child;
-    Type promote;
-    boolean originallyExplicit = false; // record whether there was originally an explicit cast
+    private final Operation operation;
+    private AExpression child;
+
+    private Type promote;
+    private boolean originallyExplicit = false; // record whether there was originally an explicit cast
 
     public EUnary(Location location, Operation operation, AExpression child) {
         super(location);
@@ -51,7 +52,7 @@ public final class EUnary extends AExpression {
         this.operation = Objects.requireNonNull(operation);
         this.child = Objects.requireNonNull(child);
     }
-    
+
     @Override
     void extractVariables(Set<String> variables) {
         child.extractVariables(variables);
@@ -60,6 +61,7 @@ public final class EUnary extends AExpression {
     @Override
     void analyze(Locals locals) {
         originallyExplicit = explicit;
+
         if (operation == Operation.NOT) {
             analyzeNot(locals);
         } else if (operation == Operation.BWNOT) {
@@ -98,18 +100,18 @@ public final class EUnary extends AExpression {
         child = child.cast(variables);
 
         if (child.constant != null) {
-            Sort sort = promote.sort;
+            Class<?> sort = promote.clazz;
 
-            if (sort == Sort.INT) {
+            if (sort == int.class) {
                 constant = ~(int)child.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = ~(long)child.constant;
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
             }
         }
 
-        if (promote.sort == Sort.DEF && expected != null) {
+        if (promote.dynamic && expected != null) {
             actual = expected;
         } else {
             actual = promote;
@@ -129,22 +131,22 @@ public final class EUnary extends AExpression {
         child = child.cast(variables);
 
         if (child.constant != null) {
-            Sort sort = promote.sort;
+            Class<?> sort = promote.clazz;
 
-            if (sort == Sort.INT) {
+            if (sort == int.class) {
                 constant = +(int)child.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = +(long)child.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = +(float)child.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = +(double)child.constant;
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
             }
         }
 
-        if (promote.sort == Sort.DEF && expected != null) {
+        if (promote.dynamic && expected != null) {
             actual = expected;
         } else {
             actual = promote;
@@ -164,22 +166,22 @@ public final class EUnary extends AExpression {
         child = child.cast(variables);
 
         if (child.constant != null) {
-            Sort sort = promote.sort;
+            Class<?> sort = promote.clazz;
 
-            if (sort == Sort.INT) {
+            if (sort == int.class) {
                 constant = -(int)child.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = -(long)child.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = -(float)child.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = -(double)child.constant;
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
             }
         }
 
-        if (promote.sort == Sort.DEF && expected != null) {
+        if (promote.dynamic && expected != null) {
             actual = expected;
         } else {
             actual = promote;
@@ -191,41 +193,37 @@ public final class EUnary extends AExpression {
         writer.writeDebugInfo(location);
 
         if (operation == Operation.NOT) {
-            if (tru == null && fals == null) {
-                Label localfals = new Label();
-                Label end = new Label();
+            Label fals = new Label();
+            Label end = new Label();
 
-                child.fals = localfals;
-                child.write(writer, globals);
+            child.write(writer, globals);
+            writer.ifZCmp(Opcodes.IFEQ, fals);
 
-                writer.push(false);
-                writer.goTo(end);
-                writer.mark(localfals);
-                writer.push(true);
-                writer.mark(end);
-            } else {
-                child.tru = fals;
-                child.fals = tru;
-                child.write(writer, globals);
-            }
+            writer.push(false);
+            writer.goTo(end);
+            writer.mark(fals);
+            writer.push(true);
+            writer.mark(end);
         } else {
-            Sort sort = promote.sort;
+            Class<?> sort = promote.clazz;
             child.write(writer, globals);
 
-            // def calls adopt the wanted return value. if there was a narrowing cast,
-            // we need to flag that so that its done at runtime.
+            // Def calls adopt the wanted return value. If there was a narrowing cast,
+            // we need to flag that so that it's done at runtime.
             int defFlags = 0;
+
             if (originallyExplicit) {
                 defFlags |= DefBootstrap.OPERATOR_EXPLICIT_CAST;
             }
+
             if (operation == Operation.BWNOT) {
-                if (sort == Sort.DEF) {
+                if (promote.dynamic) {
                     org.objectweb.asm.Type descriptor = org.objectweb.asm.Type.getMethodType(actual.type, child.actual.type);
                     writer.invokeDefCall("not", descriptor, DefBootstrap.UNARY_OPERATOR, defFlags);
                 } else {
-                    if (sort == Sort.INT) {
+                    if (sort == int.class) {
                         writer.push(-1);
-                    } else if (sort == Sort.LONG) {
+                    } else if (sort == long.class) {
                         writer.push(-1L);
                     } else {
                         throw createError(new IllegalStateException("Illegal tree structure."));
@@ -234,22 +232,25 @@ public final class EUnary extends AExpression {
                     writer.math(MethodWriter.XOR, actual.type);
                 }
             } else if (operation == Operation.SUB) {
-                if (sort == Sort.DEF) {
+                if (promote.dynamic) {
                     org.objectweb.asm.Type descriptor = org.objectweb.asm.Type.getMethodType(actual.type, child.actual.type);
                     writer.invokeDefCall("neg", descriptor, DefBootstrap.UNARY_OPERATOR, defFlags);
                 } else {
                     writer.math(MethodWriter.NEG, actual.type);
                 }
             } else if (operation == Operation.ADD) {
-                if (sort == Sort.DEF) {
+                if (promote.dynamic) {
                     org.objectweb.asm.Type descriptor = org.objectweb.asm.Type.getMethodType(actual.type, child.actual.type);
                     writer.invokeDefCall("plus", descriptor, DefBootstrap.UNARY_OPERATOR, defFlags);
-                } 
+                }
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
             }
-
-            writer.writeBranch(tru, fals);
         }
+    }
+
+    @Override
+    public String toString() {
+        return singleLineToString(operation.symbol, child);
     }
 }

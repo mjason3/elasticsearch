@@ -42,12 +42,9 @@ import org.joda.time.format.StrictISODateTimeFormat;
 
 import java.io.IOException;
 import java.io.Writer;
+import java.math.BigDecimal;
 import java.util.Locale;
-import java.util.regex.Pattern;
 
-/**
- *
- */
 public class Joda {
 
     public static FormatDateTimeFormatter forPattern(String input) {
@@ -82,7 +79,7 @@ public class Joda {
             formatter = ISODateTimeFormat.basicTime();
         } else if ("basicTimeNoMillis".equals(input) || "basic_time_no_millis".equals(input)) {
             formatter = ISODateTimeFormat.basicTimeNoMillis();
-        } else if ("basicTTime".equals(input) || "basic_t_Time".equals(input)) {
+        } else if ("basicTTime".equals(input) || "basic_t_time".equals(input)) {
             formatter = ISODateTimeFormat.basicTTime();
         } else if ("basicTTimeNoMillis".equals(input) || "basic_t_time_no_millis".equals(input)) {
             formatter = ISODateTimeFormat.basicTTimeNoMillis();
@@ -335,17 +332,19 @@ public class Joda {
         @Override
         public int parseInto(DateTimeParserBucket bucket, String text, int position) {
             boolean isPositive = text.startsWith("-") == false;
-            boolean isTooLong = text.length() > estimateParsedLength();
+            int firstDotIndex = text.indexOf('.');
+            boolean isTooLong = (firstDotIndex == -1 ? text.length() : firstDotIndex) > estimateParsedLength();
 
-            if ((isPositive && isTooLong) ||
-                // timestamps have to have UTC timezone
-                bucket.getZone() != DateTimeZone.UTC) {
+            if (bucket.getZone() != DateTimeZone.UTC) {
+                String format = hasMilliSecondPrecision ? "epoch_millis" : "epoch_second";
+                throw new IllegalArgumentException("time_zone must be UTC for format [" + format + "]");
+            } else if (isPositive && isTooLong) {
                 return -1;
             }
 
             int factor = hasMilliSecondPrecision ? 1 : 1000;
             try {
-                long millis = Long.valueOf(text) * factor;
+                long millis = new BigDecimal(text).longValue() * factor;
                 DateTime dt = new DateTime(millis, DateTimeZone.UTC);
                 bucket.saveField(DateTimeFieldType.year(), dt.getYear());
                 bucket.saveField(DateTimeFieldType.monthOfYear(), dt.getMonthOfYear());
@@ -375,21 +374,30 @@ public class Joda {
             return hasMilliSecondPrecision ? 19 : 16;
         }
 
+
+        /**
+         * We adjust the instant by displayOffset to adjust for the offset that might have been added in
+         * {@link DateTimeFormatter#printTo(Appendable, long, Chronology)} when using a time zone.
+         */
         @Override
         public void printTo(StringBuffer buf, long instant, Chronology chrono, int displayOffset, DateTimeZone displayZone, Locale locale) {
             if (hasMilliSecondPrecision) {
-                buf.append(instant);
+                buf.append(instant - displayOffset);
             } else {
-                buf.append(instant / 1000);
+                buf.append((instant  - displayOffset) / 1000);
             }
         }
 
+        /**
+         * We adjust the instant by displayOffset to adjust for the offset that might have been added in
+         * {@link DateTimeFormatter#printTo(Appendable, long, Chronology)} when using a time zone.
+         */
         @Override
         public void printTo(Writer out, long instant, Chronology chrono, int displayOffset, DateTimeZone displayZone, Locale locale) throws IOException {
             if (hasMilliSecondPrecision) {
-                out.write(String.valueOf(instant));
+                out.write(String.valueOf(instant - displayOffset));
             } else {
-                out.append(String.valueOf(instant / 1000));
+                out.append(String.valueOf((instant - displayOffset) / 1000));
             }
         }
 

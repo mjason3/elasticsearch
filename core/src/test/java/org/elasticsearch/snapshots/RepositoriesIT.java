@@ -40,11 +40,10 @@ import java.util.List;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertThrows;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.either;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 
-/**
- */
 @ESIntegTestCase.ClusterScope(minNumDataNodes = 2)
 public class RepositoriesIT extends AbstractSnapshotIntegTestCase {
     public void testRepositoryCreation() throws Exception {
@@ -142,28 +141,6 @@ public class RepositoriesIT extends AbstractSnapshotIntegTestCase {
             fail("Shouldn't be here");
         } catch (RepositoryException ex) {
             assertThat(ex.toString(), containsString("location [" + location + "] doesn't match any of the locations specified by path.repo"));
-        }
-
-        String repoUrl = invalidRepoPath.toAbsolutePath().toUri().toURL().toString();
-        String unsupportedUrl = repoUrl.replace("file:/", "netdoc:/");
-        logger.info("--> trying creating url repository with unsupported url protocol");
-        try {
-            client().admin().cluster().preparePutRepository("test-repo")
-                    .setType("url").setSettings(Settings.builder().put("url", unsupportedUrl))
-                    .get();
-            fail("Shouldn't be here");
-        } catch (RepositoryException ex) {
-            assertThat(ex.toString(), containsString("unsupported url protocol [netdoc]"));
-        }
-
-        logger.info("--> trying creating url repository with location that is not registered in path.repo setting");
-        try {
-            client().admin().cluster().preparePutRepository("test-repo")
-                    .setType("url").setSettings(Settings.builder().put("url", invalidRepoPath.toUri().toURL()))
-                    .get();
-            fail("Shouldn't be here");
-        } catch (RepositoryException ex) {
-            assertThat(ex.toString(), containsString("doesn't match any of the locations specified by path.repo"));
         }
     }
 

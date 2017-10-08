@@ -19,32 +19,30 @@
 
 package org.elasticsearch.ingest.common;
 
-import org.elasticsearch.cluster.service.ClusterService;
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.logging.DeprecationLogger;
+import org.elasticsearch.common.logging.ESLoggerFactory;
 import org.elasticsearch.ingest.AbstractProcessor;
-import org.elasticsearch.ingest.AbstractProcessorFactory;
 import org.elasticsearch.ingest.IngestDocument;
-import org.elasticsearch.script.CompiledScript;
+import org.elasticsearch.ingest.Processor;
 import org.elasticsearch.script.ExecutableScript;
 import org.elasticsearch.script.Script;
-import org.elasticsearch.script.ScriptContext;
+import org.elasticsearch.script.ScriptException;
 import org.elasticsearch.script.ScriptService;
 
-import java.util.HashMap;
 import java.util.Map;
 
 import static java.util.Collections.emptyMap;
 import static org.elasticsearch.common.Strings.hasLength;
 import static org.elasticsearch.ingest.ConfigurationUtils.newConfigurationException;
+import static org.elasticsearch.ingest.ConfigurationUtils.readOptionalMap;
 import static org.elasticsearch.ingest.ConfigurationUtils.readOptionalStringProperty;
-import static org.elasticsearch.ingest.ConfigurationUtils.readStringProperty;
-import static org.elasticsearch.script.ScriptService.ScriptType.FILE;
-import static org.elasticsearch.script.ScriptService.ScriptType.INLINE;
-import static org.elasticsearch.script.ScriptService.ScriptType.STORED;
+import static org.elasticsearch.script.ScriptType.INLINE;
+import static org.elasticsearch.script.ScriptType.STORED;
 
 /**
- * Processor that adds new fields with their corresponding values. If the field is already present, its value
- * will be replaced with the provided one.
+ * Processor that evaluates a script with an ingest document in its context.
  */
 public final class ScriptProcessor extends AbstractProcessor {
 
@@ -52,27 +50,31 @@ public final class ScriptProcessor extends AbstractProcessor {
 
     private final Script script;
     private final ScriptService scriptService;
-    private final ClusterService clusterService;
-    private final String field;
 
-    ScriptProcessor(String tag, Script script, ScriptService scriptService, ClusterService clusterService, String field)  {
+    /**
+     * Processor that evaluates a script with an ingest document in its context
+     *
+     * @param tag The processor's tag.
+     * @param script The {@link Script} to execute.
+     * @param scriptService The {@link ScriptService} used to execute the script.
+     */
+    ScriptProcessor(String tag, Script script, ScriptService scriptService)  {
         super(tag);
         this.script = script;
         this.scriptService = scriptService;
-        this.clusterService = clusterService;
-        this.field = field;
     }
 
+    /**
+     * Executes the script with the Ingest document in context.
+     *
+     * @param document The Ingest document passed into the script context under the "ctx" object.
+     */
     @Override
     public void execute(IngestDocument document) {
-        Map<String, Object> vars = new HashMap<>();
-        vars.put("ctx", document.getSourceAndMetadata());
-        CompiledScript compiledScript = scriptService.compile(script, ScriptContext.Standard.INGEST, emptyMap(), clusterService.state());
-        ExecutableScript executableScript = scriptService.executable(compiledScript, vars);
-        Object value = executableScript.run();
-        if (field != null) {
-            document.setFieldValue(field, value);
-        }
+        ExecutableScript.Factory factory = scriptService.compile(script, ExecutableScript.INGEST_CONTEXT);
+        ExecutableScript executableScript = factory.newInstance(script.getParams());
+        executableScript.setNextVar("ctx",  document.getSourceAndMetadata());
+        executableScript.run();
     }
 
     @Override
@@ -80,47 +82,74 @@ public final class ScriptProcessor extends AbstractProcessor {
         return TYPE;
     }
 
-    public static final class Factory extends AbstractProcessorFactory<ScriptProcessor> {
+    Script getScript() {
+        return script;
+    }
+
+    public static final class Factory implements Processor.Factory {
+        private final Logger logger = ESLoggerFactory.getLogger(Factory.class);
+        private final DeprecationLogger deprecationLogger = new DeprecationLogger(logger);
 
         private final ScriptService scriptService;
-        private final ClusterService clusterService;
 
-        public Factory(ScriptService scriptService, ClusterService clusterService) {
+        public Factory(ScriptService scriptService) {
             this.scriptService = scriptService;
-            this.clusterService = clusterService;
         }
 
         @Override
-        public ScriptProcessor doCreate(String processorTag, Map<String, Object> config) throws Exception {
-            String field = readOptionalStringProperty(TYPE, processorTag, config, "field");
-            String lang = readStringProperty(TYPE, processorTag, config, "lang");
-            String inline = readOptionalStringProperty(TYPE, processorTag, config, "inline");
-            String file = readOptionalStringProperty(TYPE, processorTag, config, "file");
+        @SuppressWarnings("unchecked")
+        public ScriptProcessor create(Map<String, Processor.Factory> registry, String processorTag,
+                                      Map<String, Object> config) throws Exception {
+            String lang = readOptionalStringProperty(TYPE, processorTag, config, "lang");
+            String source = readOptionalStringProperty(TYPE, processorTag, config, "source");
             String id = readOptionalStringProperty(TYPE, processorTag, config, "id");
+            Map<String, ?> params = readOptionalMap(TYPE, processorTag, config, "params");
 
-            boolean containsNoScript = !hasLength(file) && !hasLength(id) && !hasLength(inline);
-            if (containsNoScript) {
-                throw newConfigurationException(TYPE, processorTag, null, "Need [file], [id], or [inline] parameter to refer to scripts");
+            if (source == null) {
+                source = readOptionalStringProperty(TYPE, processorTag, config, "inline");
+                if (source != null) {
+                    deprecationLogger.deprecated("Specifying script source with [inline] is deprecated, use [source] instead.");
+                }
             }
 
-            boolean moreThanOneConfigured = (Strings.hasLength(file) && Strings.hasLength(id)) ||
-                (Strings.hasLength(file) && Strings.hasLength(inline)) || (Strings.hasLength(id) && Strings.hasLength(inline));
+            boolean containsNoScript = !hasLength(id) && !hasLength(source);
+            if (containsNoScript) {
+                throw newConfigurationException(TYPE, processorTag, null, "Need [id] or [source] parameter to refer to scripts");
+            }
+
+            boolean moreThanOneConfigured = Strings.hasLength(id) && Strings.hasLength(source);
             if (moreThanOneConfigured) {
-                throw newConfigurationException(TYPE, processorTag, null, "Only one of [file], [id], or [inline] may be configured");
+                throw newConfigurationException(TYPE, processorTag, null, "Only one of [id] or [source] may be configured");
+            }
+
+            if (lang == null) {
+                lang = Script.DEFAULT_SCRIPT_LANG;
+            }
+
+            if (params == null) {
+                params = emptyMap();
             }
 
             final Script script;
-            if (Strings.hasLength(file)) {
-                script = new Script(file, FILE, lang, emptyMap());
-            } else if (Strings.hasLength(inline)) {
-                script = new Script(inline, INLINE, lang, emptyMap());
+            String scriptPropertyUsed;
+            if (Strings.hasLength(source)) {
+                script = new Script(INLINE, lang, source, (Map<String, Object>)params);
+                scriptPropertyUsed = "source";
             } else if (Strings.hasLength(id)) {
-                script = new Script(id, STORED, lang, emptyMap());
+                script = new Script(STORED, null, id, (Map<String, Object>)params);
+                scriptPropertyUsed = "id";
             } else {
                 throw newConfigurationException(TYPE, processorTag, null, "Could not initialize script");
             }
 
-            return new ScriptProcessor(processorTag, script, scriptService, clusterService, field);
+            // verify script is able to be compiled before successfully creating processor.
+            try {
+                scriptService.compile(script, ExecutableScript.INGEST_CONTEXT);
+            } catch (ScriptException e) {
+                throw newConfigurationException(TYPE, processorTag, scriptPropertyUsed, e);
+            }
+
+            return new ScriptProcessor(processorTag, script, scriptService);
         }
     }
 }

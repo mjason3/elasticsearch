@@ -19,31 +19,12 @@
 package org.elasticsearch.test;
 
 import org.elasticsearch.cluster.ClusterChangedEvent;
-import org.elasticsearch.cluster.node.DiscoveryNode;
-import org.elasticsearch.cluster.routing.RoutingService;
 import org.elasticsearch.common.component.Lifecycle;
 import org.elasticsearch.common.component.LifecycleListener;
 import org.elasticsearch.discovery.Discovery;
-import org.elasticsearch.discovery.DiscoverySettings;
 import org.elasticsearch.discovery.DiscoveryStats;
 
 public class NoopDiscovery implements Discovery {
-
-
-    @Override
-    public DiscoveryNode localNode() {
-        return null;
-    }
-
-    @Override
-    public String nodeDescription() {
-        return null;
-    }
-
-    @Override
-    public void setRoutingService(RoutingService routingService) {
-
-    }
 
     @Override
     public void publish(ClusterChangedEvent clusterChangedEvent, AckListener ackListener) {
@@ -56,18 +37,8 @@ public class NoopDiscovery implements Discovery {
     }
 
     @Override
-    public DiscoverySettings getDiscoverySettings() {
-        return null;
-    }
-
-    @Override
     public void startInitialJoin() {
 
-    }
-
-    @Override
-    public int getMinimumMasterNodes() {
-        return -1;
     }
 
     @Override
@@ -86,17 +57,11 @@ public class NoopDiscovery implements Discovery {
     }
 
     @Override
-    public Discovery start() {
-        return null;
-    }
+    public void start() {}
 
     @Override
-    public Discovery stop() {
-        return null;
-    }
+    public void stop() {}
 
     @Override
-    public void close() {
-
-    }
+    public void close() {}
 }

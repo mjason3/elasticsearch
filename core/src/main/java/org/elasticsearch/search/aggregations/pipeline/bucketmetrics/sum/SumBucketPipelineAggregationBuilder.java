@@ -19,26 +19,21 @@
 
 package org.elasticsearch.search.aggregations.pipeline.bucketmetrics.sum;
 
-import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.search.aggregations.AggregatorFactory;
-import org.elasticsearch.search.aggregations.PipelineAggregationBuilder;
 import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
 import org.elasticsearch.search.aggregations.pipeline.bucketmetrics.BucketMetricsParser;
 import org.elasticsearch.search.aggregations.pipeline.bucketmetrics.BucketMetricsPipelineAggregationBuilder;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 
 public class SumBucketPipelineAggregationBuilder extends BucketMetricsPipelineAggregationBuilder<SumBucketPipelineAggregationBuilder> {
-    public static final String NAME = SumBucketPipelineAggregator.TYPE.name();
-    public static final ParseField AGGREGATION_NAME_FIELD = new ParseField(NAME);
+    public static final String NAME = "sum_bucket";
 
     public SumBucketPipelineAggregationBuilder(String name, String bucketsPath) {
-        super(name, SumBucketPipelineAggregator.TYPE.name(), new String[] { bucketsPath });
+        super(name, NAME, new String[] { bucketsPath });
     }
 
     /**
@@ -56,15 +51,6 @@ public class SumBucketPipelineAggregationBuilder extends BucketMetricsPipelineAg
     @Override
     protected PipelineAggregator createInternal(Map<String, Object> metaData) throws IOException {
         return new SumBucketPipelineAggregator(name, bucketsPaths, gapPolicy(), formatter(), metaData);
-    }
-
-    @Override
-    public void doValidate(AggregatorFactory<?> parent, AggregatorFactory<?>[] aggFactories,
-            List<PipelineAggregationBuilder> pipelineAggregatorFactories) {
-        if (bucketsPaths.length != 1) {
-            throw new IllegalStateException(PipelineAggregator.Parser.BUCKETS_PATH.getPreferredName()
-                    + " must contain a single entry for aggregation [" + name + "]");
-        }
     }
 
     @Override

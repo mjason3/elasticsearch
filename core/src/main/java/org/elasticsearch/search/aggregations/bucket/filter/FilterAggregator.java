@@ -27,9 +27,10 @@ import org.elasticsearch.search.aggregations.AggregatorFactories;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.LeafBucketCollector;
 import org.elasticsearch.search.aggregations.LeafBucketCollectorBase;
+import org.elasticsearch.search.aggregations.bucket.BucketsAggregator;
 import org.elasticsearch.search.aggregations.bucket.SingleBucketAggregator;
 import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
-import org.elasticsearch.search.aggregations.support.AggregationContext;
+import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
 import java.util.List;
@@ -38,17 +39,17 @@ import java.util.Map;
 /**
  * Aggregate all docs that match a filter.
  */
-public class FilterAggregator extends SingleBucketAggregator {
+public class FilterAggregator extends BucketsAggregator implements SingleBucketAggregator {
 
     private final Weight filter;
 
     public FilterAggregator(String name,
                             Weight filter,
                             AggregatorFactories factories,
-                            AggregationContext aggregationContext,
+                            SearchContext context,
                             Aggregator parent, List<PipelineAggregator> pipelineAggregators,
                             Map<String, Object> metaData) throws IOException {
-        super(name, factories, aggregationContext, parent, pipelineAggregators, metaData);
+        super(name, factories, context, parent, pipelineAggregators, metaData);
         this.filter = filter;
     }
 
@@ -56,7 +57,7 @@ public class FilterAggregator extends SingleBucketAggregator {
     public LeafBucketCollector getLeafCollector(LeafReaderContext ctx,
             final LeafBucketCollector sub) throws IOException {
         // no need to provide deleted docs to the filter
-        final Bits bits = Lucene.asSequentialAccessBits(ctx.reader().maxDoc(), filter.scorer(ctx));
+        final Bits bits = Lucene.asSequentialAccessBits(ctx.reader().maxDoc(), filter.scorerSupplier(ctx));
         return new LeafBucketCollectorBase(sub, null) {
             @Override
             public void collect(int doc, long bucket) throws IOException {

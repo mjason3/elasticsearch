@@ -68,11 +68,11 @@ import static org.hamcrest.Matchers.notNullValue;
 public class CorruptedTranslogIT extends ESIntegTestCase {
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return pluginList(MockTransportService.TestPlugin.class, MockEngineFactoryPlugin.class);
+        return Arrays.asList(MockTransportService.TestPlugin.class, MockEngineFactoryPlugin.class);
     }
 
     public void testCorruptTranslogFiles() throws Exception {
-        internalCluster().startNodesAsync(1, Settings.EMPTY).get();
+        internalCluster().startNodes(1, Settings.EMPTY);
 
         assertAcked(prepareCreate("test").setSettings(Settings.builder()
                 .put("index.number_of_shards", 1)
@@ -80,7 +80,6 @@ public class CorruptedTranslogIT extends ESIntegTestCase {
                 .put("index.refresh_interval", "-1")
                 .put(MockEngineSupport.DISABLE_FLUSH_ON_CLOSE.getKey(), true) // never flush - always recover from translog
         ));
-        ensureYellow();
 
         // Index some documents
         int numDocs = scaledRandomIntBetween(100, 1000);

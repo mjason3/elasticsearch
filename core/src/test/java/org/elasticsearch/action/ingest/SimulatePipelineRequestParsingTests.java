@@ -19,31 +19,30 @@
 
 package org.elasticsearch.action.ingest;
 
-import org.elasticsearch.cluster.service.ClusterService;
-import org.elasticsearch.ingest.PipelineStore;
-import org.elasticsearch.ingest.ProcessorsRegistry;
-import org.elasticsearch.ingest.TestProcessor;
-import org.elasticsearch.ingest.TestTemplateService;
-import org.elasticsearch.ingest.CompoundProcessor;
-import org.elasticsearch.ingest.IngestDocument;
-import org.elasticsearch.ingest.Pipeline;
-import org.elasticsearch.ingest.Processor;
-import org.elasticsearch.script.ScriptService;
-import org.elasticsearch.test.ESTestCase;
-import org.junit.Before;
-
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import org.elasticsearch.ingest.CompoundProcessor;
+import org.elasticsearch.ingest.IngestDocument;
+import org.elasticsearch.ingest.Pipeline;
+import org.elasticsearch.ingest.PipelineStore;
+import org.elasticsearch.ingest.Processor;
+import org.elasticsearch.ingest.TestProcessor;
+import org.elasticsearch.test.ESTestCase;
+import org.junit.Before;
+
 import static org.elasticsearch.action.ingest.SimulatePipelineRequest.Fields;
 import static org.elasticsearch.action.ingest.SimulatePipelineRequest.SIMULATED_PIPELINE_ID;
 import static org.elasticsearch.ingest.IngestDocument.MetaData.ID;
 import static org.elasticsearch.ingest.IngestDocument.MetaData.INDEX;
+import static org.elasticsearch.ingest.IngestDocument.MetaData.PARENT;
+import static org.elasticsearch.ingest.IngestDocument.MetaData.ROUTING;
 import static org.elasticsearch.ingest.IngestDocument.MetaData.TYPE;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
@@ -58,13 +57,12 @@ public class SimulatePipelineRequestParsingTests extends ESTestCase {
     public void init() throws IOException {
         TestProcessor processor = new TestProcessor(ingestDocument -> {});
         CompoundProcessor pipelineCompoundProcessor = new CompoundProcessor(processor);
-        Pipeline pipeline = new Pipeline(SIMULATED_PIPELINE_ID, null, pipelineCompoundProcessor);
-        ProcessorsRegistry.Builder processorRegistryBuilder = new ProcessorsRegistry.Builder();
-        processorRegistryBuilder.registerProcessor("mock_processor", ((registry) -> mock(Processor.Factory.class)));
-        ProcessorsRegistry processorRegistry = processorRegistryBuilder.build(mock(ScriptService.class), mock(ClusterService.class));
+        Pipeline pipeline = new Pipeline(SIMULATED_PIPELINE_ID, null, null, pipelineCompoundProcessor);
+        Map<String, Processor.Factory> registry =
+            Collections.singletonMap("mock_processor", (factories, tag, config) -> processor);
         store = mock(PipelineStore.class);
         when(store.get(SIMULATED_PIPELINE_ID)).thenReturn(pipeline);
-        when(store.getProcessorRegistry()).thenReturn(processorRegistry);
+        when(store.getProcessorFactories()).thenReturn(registry);
     }
 
     public void testParseUsingPipelineStore() throws Exception {
@@ -76,14 +74,14 @@ public class SimulatePipelineRequestParsingTests extends ESTestCase {
         requestContent.put(Fields.DOCS, docs);
         for (int i = 0; i < numDocs; i++) {
             Map<String, Object> doc = new HashMap<>();
-            String index = randomAsciiOfLengthBetween(1, 10);
-            String type = randomAsciiOfLengthBetween(1, 10);
-            String id = randomAsciiOfLengthBetween(1, 10);
+            String index = randomAlphaOfLengthBetween(1, 10);
+            String type = randomAlphaOfLengthBetween(1, 10);
+            String id = randomAlphaOfLengthBetween(1, 10);
             doc.put(INDEX.getFieldName(), index);
             doc.put(TYPE.getFieldName(), type);
             doc.put(ID.getFieldName(), id);
-            String fieldName = randomAsciiOfLengthBetween(1, 10);
-            String fieldValue = randomAsciiOfLengthBetween(1, 10);
+            String fieldName = randomAlphaOfLengthBetween(1, 10);
+            String fieldValue = randomAlphaOfLengthBetween(1, 10);
             doc.put(Fields.SOURCE, Collections.singletonMap(fieldName, fieldValue));
             docs.add(doc);
             Map<String, Object> expectedDoc = new HashMap<>();
@@ -121,20 +119,24 @@ public class SimulatePipelineRequestParsingTests extends ESTestCase {
         requestContent.put(Fields.DOCS, docs);
         for (int i = 0; i < numDocs; i++) {
             Map<String, Object> doc = new HashMap<>();
-            String index = randomAsciiOfLengthBetween(1, 10);
-            String type = randomAsciiOfLengthBetween(1, 10);
-            String id = randomAsciiOfLengthBetween(1, 10);
-            doc.put(INDEX.getFieldName(), index);
-            doc.put(TYPE.getFieldName(), type);
-            doc.put(ID.getFieldName(), id);
-            String fieldName = randomAsciiOfLengthBetween(1, 10);
-            String fieldValue = randomAsciiOfLengthBetween(1, 10);
+            Map<String, Object> expectedDoc = new HashMap<>();
+            List<IngestDocument.MetaData> fields = Arrays.asList(INDEX, TYPE, ID, ROUTING, PARENT);
+            for(IngestDocument.MetaData field : fields) {
+                if(randomBoolean()) {
+                    String value = randomAlphaOfLengthBetween(1, 10);
+                    doc.put(field.getFieldName(), value);
+                    expectedDoc.put(field.getFieldName(), value);
+                }
+                else {
+                    Integer value = randomIntBetween(1, 1000000);
+                    doc.put(field.getFieldName(), value);
+                    expectedDoc.put(field.getFieldName(), String.valueOf(value));
+                }
+            }
+            String fieldName = randomAlphaOfLengthBetween(1, 10);
+            String fieldValue = randomAlphaOfLengthBetween(1, 10);
             doc.put(Fields.SOURCE, Collections.singletonMap(fieldName, fieldValue));
             docs.add(doc);
-            Map<String, Object> expectedDoc = new HashMap<>();
-            expectedDoc.put(INDEX.getFieldName(), index);
-            expectedDoc.put(TYPE.getFieldName(), type);
-            expectedDoc.put(ID.getFieldName(), id);
             expectedDoc.put(Fields.SOURCE, Collections.singletonMap(fieldName, fieldValue));
             expectedDocs.add(expectedDoc);
         }
@@ -177,6 +179,8 @@ public class SimulatePipelineRequestParsingTests extends ESTestCase {
             assertThat(metadataMap.get(INDEX), equalTo(expectedDocument.get(INDEX.getFieldName())));
             assertThat(metadataMap.get(TYPE), equalTo(expectedDocument.get(TYPE.getFieldName())));
             assertThat(metadataMap.get(ID), equalTo(expectedDocument.get(ID.getFieldName())));
+            assertThat(metadataMap.get(ROUTING), equalTo(expectedDocument.get(ROUTING.getFieldName())));
+            assertThat(metadataMap.get(PARENT), equalTo(expectedDocument.get(PARENT.getFieldName())));
             assertThat(ingestDocument.getSourceAndMetadata(), equalTo(expectedDocument.get(Fields.SOURCE)));
         }
 
@@ -195,7 +199,7 @@ public class SimulatePipelineRequestParsingTests extends ESTestCase {
     }
 
     public void testNonExistentPipelineId() {
-        String pipelineId = randomAsciiOfLengthBetween(1, 10);
+        String pipelineId = randomAlphaOfLengthBetween(1, 10);
         Map<String, Object> requestContent = new HashMap<>();
         List<Map<String, Object>> docs = new ArrayList<>();
         requestContent.put(Fields.DOCS, docs);

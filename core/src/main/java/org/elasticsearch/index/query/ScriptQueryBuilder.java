@@ -20,39 +20,29 @@
 package org.elasticsearch.index.query;
 
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.search.ConstantScoreScorer;
+import org.apache.lucene.search.ConstantScoreWeight;
+import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.RandomAccessWeight;
+import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.TwoPhaseIterator;
 import org.apache.lucene.search.Weight;
-import org.apache.lucene.util.Bits;
-import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.script.LeafSearchScript;
+import org.elasticsearch.script.FilterScript;
 import org.elasticsearch.script.Script;
-import org.elasticsearch.script.Script.ScriptField;
-import org.elasticsearch.script.ScriptContext;
-import org.elasticsearch.script.ScriptParameterParser;
-import org.elasticsearch.script.ScriptParameterParser.ScriptParameterValue;
-import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.script.SearchScript;
-import org.elasticsearch.search.lookup.SearchLookup;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 public class ScriptQueryBuilder extends AbstractQueryBuilder<ScriptQueryBuilder> {
-
     public static final String NAME = "script";
-    public static final ParseField QUERY_NAME_FIELD = new ParseField(NAME);
 
     private static final ParseField PARAMS_FIELD = new ParseField("params");
 
@@ -90,18 +80,14 @@ public class ScriptQueryBuilder extends AbstractQueryBuilder<ScriptQueryBuilder>
     @Override
     protected void doXContent(XContentBuilder builder, Params builderParams) throws IOException {
         builder.startObject(NAME);
-        builder.field(ScriptField.SCRIPT.getPreferredName(), script);
+        builder.field(Script.SCRIPT_PARSE_FIELD.getPreferredName(), script);
         printBoostAndQueryName(builder);
         builder.endObject();
     }
 
-    public static Optional<ScriptQueryBuilder> fromXContent(QueryParseContext parseContext) throws IOException {
-        XContentParser parser = parseContext.parser();
-        ScriptParameterParser scriptParameterParser = new ScriptParameterParser();
-
+    public static ScriptQueryBuilder fromXContent(XContentParser parser) throws IOException {
         // also, when caching, since its isCacheable is false, will result in loading all bit set...
         Script script = null;
-        Map<String, Object> params = null;
 
         float boost = AbstractQueryBuilder.DEFAULT_BOOST;
         String queryName = null;
@@ -111,70 +97,55 @@ public class ScriptQueryBuilder extends AbstractQueryBuilder<ScriptQueryBuilder>
         while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
             if (token == XContentParser.Token.FIELD_NAME) {
                 currentFieldName = parser.currentName();
-            } else if (parseContext.isDeprecatedSetting(currentFieldName)) {
-                // skip
             } else if (token == XContentParser.Token.START_OBJECT) {
-                if (parseContext.getParseFieldMatcher().match(currentFieldName, ScriptField.SCRIPT)) {
-                    script = Script.parse(parser, parseContext.getParseFieldMatcher());
-                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, PARAMS_FIELD)) {
-                    // TODO remove in 3.0 (here to support old script APIs)
-                    params = parser.map();
+                if (Script.SCRIPT_PARSE_FIELD.match(currentFieldName)) {
+                    script = Script.parse(parser);
                 } else {
                     throw new ParsingException(parser.getTokenLocation(), "[script] query does not support [" + currentFieldName + "]");
                 }
             } else if (token.isValue()) {
-                if (parseContext.getParseFieldMatcher().match(currentFieldName, AbstractQueryBuilder.NAME_FIELD)) {
+                if (AbstractQueryBuilder.NAME_FIELD.match(currentFieldName)) {
                     queryName = parser.text();
-                } else if (parseContext.getParseFieldMatcher().match(currentFieldName, AbstractQueryBuilder.BOOST_FIELD)) {
+                } else if (AbstractQueryBuilder.BOOST_FIELD.match(currentFieldName)) {
                     boost = parser.floatValue();
-                } else if (!scriptParameterParser.token(currentFieldName, token, parser, parseContext.getParseFieldMatcher())) {
+                } else if (Script.SCRIPT_PARSE_FIELD.match(currentFieldName)) {
+                    script = Script.parse(parser);
+                } else {
                     throw new ParsingException(parser.getTokenLocation(), "[script] query does not support [" + currentFieldName + "]");
                 }
             }
-        }
-
-        if (script == null) { // Didn't find anything using the new API so try using the old one instead
-            ScriptParameterValue scriptValue = scriptParameterParser.getDefaultScriptParameterValue();
-            if (scriptValue != null) {
-                if (params == null) {
-                    params = new HashMap<>();
-                }
-                script = new Script(scriptValue.script(), scriptValue.scriptType(), scriptParameterParser.lang(), params);
-            }
-        } else if (params != null) {
-            throw new ParsingException(parser.getTokenLocation(),
-                    "script params must be specified inside script object in a [script] filter");
         }
 
         if (script == null) {
             throw new ParsingException(parser.getTokenLocation(), "script must be provided with a [script] filter");
         }
 
-        return Optional.of(new ScriptQueryBuilder(script)
+        return new ScriptQueryBuilder(script)
                 .boost(boost)
-                .queryName(queryName));
+                .queryName(queryName);
     }
 
     @Override
     protected Query doToQuery(QueryShardContext context) throws IOException {
-        return new ScriptQuery(script, context.getScriptService(), context.lookup(), context.getClusterState());
+        FilterScript.Factory factory = context.getScriptService().compile(script, FilterScript.CONTEXT);
+        FilterScript.LeafFactory filterScript = factory.newFactory(script.getParams(), context.lookup());
+        return new ScriptQuery(script, filterScript);
     }
 
     static class ScriptQuery extends Query {
 
-        private final Script script;
+        final Script script;
+        final FilterScript.LeafFactory filterScript;
 
-        private final SearchScript searchScript;
-
-        public ScriptQuery(Script script, ScriptService scriptService, SearchLookup searchLookup, ClusterState state) {
+        ScriptQuery(Script script, FilterScript.LeafFactory filterScript) {
             this.script = script;
-            this.searchScript = scriptService.search(searchLookup, script, ScriptContext.Standard.SEARCH, Collections.emptyMap(), state);
+            this.filterScript = filterScript;
         }
 
         @Override
         public String toString(String field) {
             StringBuilder buffer = new StringBuilder();
-            buffer.append("ScriptFilter(");
+            buffer.append("ScriptQuery(");
             buffer.append(script);
             buffer.append(")");
             return buffer.toString();
@@ -182,49 +153,48 @@ public class ScriptQueryBuilder extends AbstractQueryBuilder<ScriptQueryBuilder>
 
         @Override
         public boolean equals(Object obj) {
-            if (this == obj)
+            // TODO: Do this if/when we can assume scripts are pure functions
+            // and they have a reliable equals impl
+            /*if (this == obj)
                 return true;
             if (sameClassAs(obj) == false)
                 return false;
             ScriptQuery other = (ScriptQuery) obj;
-            return Objects.equals(script, other.script);
+            return Objects.equals(script, other.script);*/
+            return this == obj;
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(classHash(), script);
+            // TODO: Do this if/when we can assume scripts are pure functions
+            // and they have a reliable equals impl
+            // return Objects.hash(classHash(), script);
+            return System.identityHashCode(this);
         }
 
         @Override
-        public Weight createWeight(IndexSearcher searcher, boolean needsScores) throws IOException {
-            return new RandomAccessWeight(this) {
+        public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+            return new ConstantScoreWeight(this, boost) {
+
                 @Override
-                protected Bits getMatchingDocs(final LeafReaderContext context) throws IOException {
-                    final LeafSearchScript leafScript = searchScript.getLeafSearchScript(context);
-                    return new Bits() {
+                public Scorer scorer(LeafReaderContext context) throws IOException {
+                    DocIdSetIterator approximation = DocIdSetIterator.all(context.reader().maxDoc());
+                    final FilterScript leafScript = filterScript.newInstance(context);
+                    TwoPhaseIterator twoPhase = new TwoPhaseIterator(approximation) {
 
                         @Override
-                        public boolean get(int doc) {
-                            leafScript.setDocument(doc);
-                            Object val = leafScript.run();
-                            if (val == null) {
-                                return false;
-                            }
-                            if (val instanceof Boolean) {
-                                return (Boolean) val;
-                            }
-                            if (val instanceof Number) {
-                                return ((Number) val).longValue() != 0;
-                            }
-                            throw new IllegalArgumentException("Can't handle type [" + val + "] in script filter");
+                        public boolean matches() throws IOException {
+                            leafScript.setDocument(approximation.docID());
+                            return leafScript.execute();
                         }
 
                         @Override
-                        public int length() {
-                            return context.reader().maxDoc();
+                        public float matchCost() {
+                            // TODO: how can we compute this?
+                            return 1000f;
                         }
-
                     };
+                    return new ConstantScoreScorer(this, score(), twoPhase);
                 }
             };
         }
@@ -239,4 +209,6 @@ public class ScriptQueryBuilder extends AbstractQueryBuilder<ScriptQueryBuilder>
     protected boolean doEquals(ScriptQueryBuilder other) {
         return Objects.equals(script, other.script);
     }
+
+
 }

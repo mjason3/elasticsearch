@@ -19,6 +19,8 @@
 
 package org.elasticsearch.ingest.common;
 
+import java.util.Map;
+
 /**
  * Processor that trims the content of string fields.
  * Throws exception is the field is not of type string.
@@ -27,8 +29,8 @@ public final class TrimProcessor extends AbstractStringProcessor {
 
     public static final String TYPE = "trim";
 
-    TrimProcessor(String processorTag, String field) {
-        super(processorTag, field);
+    TrimProcessor(String processorTag, String field, boolean ignoreMissing, String targetField) {
+        super(processorTag, field, ignoreMissing, targetField);
     }
 
     @Override
@@ -41,15 +43,16 @@ public final class TrimProcessor extends AbstractStringProcessor {
         return TYPE;
     }
 
-    public static final class Factory extends AbstractStringProcessor.Factory<TrimProcessor> {
+    public static final class Factory extends AbstractStringProcessor.Factory {
 
         public Factory() {
             super(TYPE);
         }
 
         @Override
-        protected TrimProcessor newProcessor(String tag, String field) {
-            return new TrimProcessor(tag, field);
+        protected TrimProcessor newProcessor(String tag, Map<String, Object> config, String field,
+                                             boolean ignoreMissing, String targetField) {
+            return new TrimProcessor(tag, field, ignoreMissing, targetField);
         }
     }
 }

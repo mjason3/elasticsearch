@@ -19,57 +19,95 @@
 
 package org.elasticsearch.ingest.common;
 
-import org.elasticsearch.node.NodeModule;
-import org.elasticsearch.plugins.Plugin;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
-public class IngestCommonPlugin extends Plugin {
+import org.elasticsearch.action.ActionRequest;
+import org.elasticsearch.action.ActionResponse;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
+import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.common.settings.ClusterSettings;
+import org.elasticsearch.common.settings.IndexScopedSettings;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.settings.SettingsFilter;
+import org.elasticsearch.ingest.Processor;
+import org.elasticsearch.plugins.ActionPlugin;
+import org.elasticsearch.plugins.IngestPlugin;
+import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.rest.RestController;
+import org.elasticsearch.rest.RestHandler;
 
-    public static final String NAME = "ingest-common";
-
-    private final Map<String, String> builtinPatterns;
-
-    public IngestCommonPlugin() throws IOException {
-        this.builtinPatterns = loadBuiltinPatterns();
-    }
-
-    public void onModule(NodeModule nodeModule) {
-        nodeModule.registerProcessor(DateProcessor.TYPE, (registry) -> new DateProcessor.Factory());
-        nodeModule.registerProcessor(SetProcessor.TYPE, (registry) -> new SetProcessor.Factory(registry.getTemplateService()));
-        nodeModule.registerProcessor(AppendProcessor.TYPE, (registry) -> new AppendProcessor.Factory(registry.getTemplateService()));
-        nodeModule.registerProcessor(RenameProcessor.TYPE, (registry) -> new RenameProcessor.Factory());
-        nodeModule.registerProcessor(RemoveProcessor.TYPE, (registry) -> new RemoveProcessor.Factory(registry.getTemplateService()));
-        nodeModule.registerProcessor(SplitProcessor.TYPE, (registry) -> new SplitProcessor.Factory());
-        nodeModule.registerProcessor(JoinProcessor.TYPE, (registry) -> new JoinProcessor.Factory());
-        nodeModule.registerProcessor(UppercaseProcessor.TYPE, (registry) -> new UppercaseProcessor.Factory());
-        nodeModule.registerProcessor(LowercaseProcessor.TYPE, (registry) -> new LowercaseProcessor.Factory());
-        nodeModule.registerProcessor(TrimProcessor.TYPE, (registry) -> new TrimProcessor.Factory());
-        nodeModule.registerProcessor(ConvertProcessor.TYPE, (registry) -> new ConvertProcessor.Factory());
-        nodeModule.registerProcessor(GsubProcessor.TYPE, (registry) -> new GsubProcessor.Factory());
-        nodeModule.registerProcessor(FailProcessor.TYPE, (registry) -> new FailProcessor.Factory(registry.getTemplateService()));
-        nodeModule.registerProcessor(ForEachProcessor.TYPE, (registry) -> new ForEachProcessor.Factory(registry));
-        nodeModule.registerProcessor(DateIndexNameProcessor.TYPE, (registry) -> new DateIndexNameProcessor.Factory());
-        nodeModule.registerProcessor(SortProcessor.TYPE, (registry) -> new SortProcessor.Factory());
-        nodeModule.registerProcessor(GrokProcessor.TYPE, (registry) -> new GrokProcessor.Factory(builtinPatterns));
-        nodeModule.registerProcessor(ScriptProcessor.TYPE, (registry) ->
-            new ScriptProcessor.Factory(registry.getScriptService(), registry.getClusterService()));
-    }
+public class IngestCommonPlugin extends Plugin implements ActionPlugin, IngestPlugin {
 
     // Code for loading built-in grok patterns packaged with the jar file:
-
     private static final String[] PATTERN_NAMES = new String[] {
-            "aws", "bacula", "bro", "exim", "firewalls", "grok-patterns", "haproxy",
-            "java", "junos", "linux-syslog", "mcollective-patterns", "mongodb", "nagios",
-            "postgresql", "rails", "redis", "ruby"
+        "aws", "bacula", "bro", "exim", "firewalls", "grok-patterns", "haproxy",
+        "java", "junos", "linux-syslog", "mcollective-patterns", "mongodb", "nagios",
+        "postgresql", "rails", "redis", "ruby"
     };
+    static final Map<String, String> GROK_PATTERNS;
+    static {
+        try {
+            GROK_PATTERNS = loadBuiltinPatterns();
+        } catch (IOException e) {
+            throw new UncheckedIOException("unable to load built-in grok patterns", e);
+        }
+    }
+
+    public IngestCommonPlugin() throws IOException {
+    }
+
+    @Override
+    public Map<String, Processor.Factory> getProcessors(Processor.Parameters parameters) {
+        Map<String, Processor.Factory> processors = new HashMap<>();
+        processors.put(DateProcessor.TYPE, new DateProcessor.Factory());
+        processors.put(SetProcessor.TYPE, new SetProcessor.Factory(parameters.scriptService));
+        processors.put(AppendProcessor.TYPE, new AppendProcessor.Factory(parameters.scriptService));
+        processors.put(RenameProcessor.TYPE, new RenameProcessor.Factory());
+        processors.put(RemoveProcessor.TYPE, new RemoveProcessor.Factory(parameters.scriptService));
+        processors.put(SplitProcessor.TYPE, new SplitProcessor.Factory());
+        processors.put(JoinProcessor.TYPE, new JoinProcessor.Factory());
+        processors.put(UppercaseProcessor.TYPE, new UppercaseProcessor.Factory());
+        processors.put(LowercaseProcessor.TYPE, new LowercaseProcessor.Factory());
+        processors.put(TrimProcessor.TYPE, new TrimProcessor.Factory());
+        processors.put(ConvertProcessor.TYPE, new ConvertProcessor.Factory());
+        processors.put(GsubProcessor.TYPE, new GsubProcessor.Factory());
+        processors.put(FailProcessor.TYPE, new FailProcessor.Factory(parameters.scriptService));
+        processors.put(ForEachProcessor.TYPE, new ForEachProcessor.Factory());
+        processors.put(DateIndexNameProcessor.TYPE, new DateIndexNameProcessor.Factory());
+        processors.put(SortProcessor.TYPE, new SortProcessor.Factory());
+        processors.put(GrokProcessor.TYPE, new GrokProcessor.Factory(GROK_PATTERNS));
+        processors.put(ScriptProcessor.TYPE, new ScriptProcessor.Factory(parameters.scriptService));
+        processors.put(DotExpanderProcessor.TYPE, new DotExpanderProcessor.Factory());
+        processors.put(JsonProcessor.TYPE, new JsonProcessor.Factory());
+        processors.put(KeyValueProcessor.TYPE, new KeyValueProcessor.Factory());
+        processors.put(URLDecodeProcessor.TYPE, new URLDecodeProcessor.Factory());
+        return Collections.unmodifiableMap(processors);
+    }
+
+    @Override
+    public List<ActionHandler<? extends ActionRequest, ? extends ActionResponse>> getActions() {
+        return Arrays.asList(new ActionHandler<>(GrokProcessorGetAction.INSTANCE, GrokProcessorGetAction.TransportAction.class));
+    }
+
+    @Override
+    public List<RestHandler> getRestHandlers(Settings settings, RestController restController, ClusterSettings clusterSettings,
+                                             IndexScopedSettings indexScopedSettings, SettingsFilter settingsFilter,
+                                             IndexNameExpressionResolver indexNameExpressionResolver,
+                                             Supplier<DiscoveryNodes> nodesInCluster) {
+        return Arrays.asList(new GrokProcessorGetAction.RestAction(settings, restController));
+    }
+
 
     public static Map<String, String> loadBuiltinPatterns() throws IOException {
         Map<String, String> builtinPatterns = new HashMap<>();

@@ -18,12 +18,6 @@
  */
 package org.elasticsearch.search.aggregations.bucket.range;
 
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.util.BytesRef;
@@ -36,8 +30,17 @@ import org.elasticsearch.search.aggregations.LeafBucketCollector;
 import org.elasticsearch.search.aggregations.LeafBucketCollectorBase;
 import org.elasticsearch.search.aggregations.bucket.BucketsAggregator;
 import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
-import org.elasticsearch.search.aggregations.support.AggregationContext;
 import org.elasticsearch.search.aggregations.support.ValuesSource;
+import org.elasticsearch.search.internal.SearchContext;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+
+import static java.util.Collections.emptyList;
 
 /** A range aggregator for values that are stored in SORTED_SET doc values. */
 public final class BinaryRangeAggregator extends BucketsAggregator {
@@ -75,10 +78,10 @@ public final class BinaryRangeAggregator extends BucketsAggregator {
 
     public BinaryRangeAggregator(String name, AggregatorFactories factories,
             ValuesSource.Bytes valuesSource, DocValueFormat format,
-            List<Range> ranges, boolean keyed, AggregationContext aggregationContext,
+            List<Range> ranges, boolean keyed, SearchContext context,
             Aggregator parent, List<PipelineAggregator> pipelineAggregators,
             Map<String, Object> metaData) throws IOException {
-        super(name, factories, aggregationContext, parent, pipelineAggregators, metaData);
+        super(name, factories, context, parent, pipelineAggregators, metaData);
         this.valuesSource = valuesSource;
         this.format = format;
         this.keyed = keyed;
@@ -117,14 +120,14 @@ public final class BinaryRangeAggregator extends BucketsAggregator {
         }
     }
 
-    static abstract class SortedSetRangeLeafCollector extends LeafBucketCollectorBase {
+    abstract static class SortedSetRangeLeafCollector extends LeafBucketCollectorBase {
 
         final long[] froms, tos, maxTos;
         final SortedSetDocValues values;
         final LeafBucketCollector sub;
 
         SortedSetRangeLeafCollector(SortedSetDocValues values,
-                Range[] ranges, LeafBucketCollector sub) {
+                Range[] ranges, LeafBucketCollector sub) throws IOException {
             super(sub, values);
             for (int i = 1; i < ranges.length; ++i) {
                 if (RANGE_COMPARATOR.compare(ranges[i-1], ranges[i]) > 0) {
@@ -164,10 +167,13 @@ public final class BinaryRangeAggregator extends BucketsAggregator {
 
         @Override
         public void collect(int doc, long bucket) throws IOException {
-            values.setDocument(doc);
-            int lo = 0;
-            for (long ord = values.nextOrd(); ord != SortedSetDocValues.NO_MORE_ORDS; ord = values.nextOrd()) {
-                lo = collect(doc, ord, bucket, lo);
+            if (values.advanceExact(doc)) {
+                int lo = 0;
+                for (long ord = values
+                        .nextOrd(); ord != SortedSetDocValues.NO_MORE_ORDS; ord = values
+                                .nextOrd()) {
+                    lo = collect(doc, ord, bucket, lo);
+                }
             }
         }
 
@@ -223,7 +229,7 @@ public final class BinaryRangeAggregator extends BucketsAggregator {
         protected abstract void doCollect(LeafBucketCollector sub, int doc, long bucket) throws IOException;
     }
 
-    static abstract class SortedBinaryRangeLeafCollector extends LeafBucketCollectorBase {
+    abstract static class SortedBinaryRangeLeafCollector extends LeafBucketCollectorBase {
 
         final Range[] ranges;
         final BytesRef[] maxTos;
@@ -256,11 +262,12 @@ public final class BinaryRangeAggregator extends BucketsAggregator {
 
         @Override
         public void collect(int doc, long bucket) throws IOException {
-            values.setDocument(doc);
-            final int valuesCount = values.count();
-            for (int i = 0, lo = 0; i < valuesCount; ++i) {
-                final BytesRef value = values.valueAt(i);
-                lo = collect(doc, value, bucket, lo);
+            if (values.advanceExact(doc)) {
+                final int valuesCount = values.docValueCount();
+                for (int i = 0, lo = 0; i < valuesCount; ++i) {
+                    final BytesRef value = values.nextValue();
+                    lo = collect(doc, value, bucket, lo);
+                }
             }
         }
 
@@ -318,19 +325,18 @@ public final class BinaryRangeAggregator extends BucketsAggregator {
 
     @Override
     public InternalAggregation buildAggregation(long bucket) throws IOException {
-        InternalBinaryRange.Bucket[] buckets = new InternalBinaryRange.Bucket[ranges.length];
-        for (int i = 0; i < buckets.length; ++i) {
+        List<InternalBinaryRange.Bucket> buckets = new ArrayList<>(ranges.length);
+        for (int i = 0; i < ranges.length; ++i) {
             long bucketOrd = bucket * ranges.length + i;
-            buckets[i] = new InternalBinaryRange.Bucket(format, keyed,
+            buckets.add(new InternalBinaryRange.Bucket(format, keyed,
                     ranges[i].key, ranges[i].from, ranges[i].to,
-                    bucketDocCount(bucketOrd), bucketAggregations(bucketOrd));
+                    bucketDocCount(bucketOrd), bucketAggregations(bucketOrd)));
         }
         return new InternalBinaryRange(name, format, keyed, buckets, pipelineAggregators(), metaData());
     }
 
     @Override
     public InternalAggregation buildEmptyAggregation() {
-        return new InternalBinaryRange(name, format, keyed, new InternalBinaryRange.Bucket[0], pipelineAggregators(), metaData());
+        return new InternalBinaryRange(name, format, keyed, emptyList(), pipelineAggregators(), metaData());
     }
-
 }

@@ -20,7 +20,6 @@
 package org.elasticsearch.cluster.routing.allocation.command;
 
 import org.elasticsearch.common.ParseField;
-import org.elasticsearch.common.ParseFieldMatcherSupplier;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.ObjectParser;
@@ -35,8 +34,8 @@ public abstract class BasePrimaryAllocationCommand extends AbstractAllocateAlloc
 
     private static final String ACCEPT_DATA_LOSS_FIELD = "accept_data_loss";
 
-    protected static <T extends Builder<?>> ObjectParser<T, ParseFieldMatcherSupplier> createAllocatePrimaryParser(String command) {
-        ObjectParser<T, ParseFieldMatcherSupplier> parser = AbstractAllocateAllocationCommand.createAllocateParser(command);
+    protected static <T extends Builder<?>> ObjectParser<T, Void> createAllocatePrimaryParser(String command) {
+        ObjectParser<T, Void> parser = AbstractAllocateAllocationCommand.createAllocateParser(command);
         parser.declareBoolean(Builder::setAcceptDataLoss, new ParseField(ACCEPT_DATA_LOSS_FIELD));
         return parser;
     }
@@ -71,7 +70,7 @@ public abstract class BasePrimaryAllocationCommand extends AbstractAllocateAlloc
         return acceptDataLoss;
     }
 
-    protected static abstract class Builder<T extends BasePrimaryAllocationCommand> extends AbstractAllocateAllocationCommand.Builder<T> {
+    protected abstract static class Builder<T extends BasePrimaryAllocationCommand> extends AbstractAllocateAllocationCommand.Builder<T> {
         protected boolean acceptDataLoss;
 
         public void setAcceptDataLoss(boolean acceptDataLoss) {

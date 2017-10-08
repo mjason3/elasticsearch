@@ -19,27 +19,28 @@
 
 package org.elasticsearch.common.geo.builders;
 
-import org.locationtech.spatial4j.context.jts.JtsSpatialContext;
-import org.locationtech.spatial4j.exception.InvalidShapeException;
-import org.locationtech.spatial4j.shape.Shape;
-import org.locationtech.spatial4j.shape.jts.JtsGeometry;
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Geometry;
 import com.vividsolutions.jts.geom.GeometryFactory;
 
+import org.apache.logging.log4j.Logger;
+import org.elasticsearch.Assertions;
 import org.elasticsearch.ElasticsearchParseException;
-import org.elasticsearch.action.support.ToXContentToBytes;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.NamedWriteable;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.ESLoggerFactory;
 import org.elasticsearch.common.unit.DistanceUnit.Distance;
-import org.elasticsearch.common.xcontent.ToXContent;
+import org.elasticsearch.common.xcontent.ToXContentObject;
 import org.elasticsearch.common.xcontent.XContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.mapper.geo.GeoShapeFieldMapper;
+import org.elasticsearch.index.mapper.GeoShapeFieldMapper;
+import org.locationtech.spatial4j.context.jts.JtsSpatialContext;
+import org.locationtech.spatial4j.exception.InvalidShapeException;
+import org.locationtech.spatial4j.shape.Shape;
+import org.locationtech.spatial4j.shape.jts.JtsGeometry;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,17 +52,15 @@ import java.util.Locale;
 /**
  * Basic class for building GeoJSON shapes like Polygons, Linestrings, etc
  */
-public abstract class ShapeBuilder extends ToXContentToBytes implements NamedWriteable {
+public abstract class ShapeBuilder implements NamedWriteable, ToXContentObject {
 
-    protected static final ESLogger LOGGER = ESLoggerFactory.getLogger(ShapeBuilder.class.getName());
+    protected static final Logger LOGGER = ESLoggerFactory.getLogger(ShapeBuilder.class.getName());
 
     private static final boolean DEBUG;
     static {
         // if asserts are enabled we run the debug statements even if they are not logged
         // to prevent exceptions only present if debug enabled
-        boolean debug = false;
-        assert debug = true;
-        DEBUG = debug;
+        DEBUG = Assertions.ENABLED;
     }
 
     public static final double DATELINE = 180;
@@ -80,21 +79,21 @@ public abstract class ShapeBuilder extends ToXContentToBytes implements NamedWri
     /** It's possible that some geometries in a MULTI* shape might overlap. With the possible exception of GeometryCollection,
      * this normally isn't allowed.
      */
-    protected final boolean multiPolygonMayOverlap = false;
+    protected static final boolean MULTI_POLYGON_MAY_OVERLAP = false;
     /** @see org.locationtech.spatial4j.shape.jts.JtsGeometry#validate() */
-    protected final boolean autoValidateJtsGeometry = true;
+    protected static final boolean AUTO_VALIDATE_JTS_GEOMETRY = true;
     /** @see org.locationtech.spatial4j.shape.jts.JtsGeometry#index() */
-    protected final boolean autoIndexJtsGeometry = true;//may want to turn off once SpatialStrategy impls do it.
+    protected static final boolean AUTO_INDEX_JTS_GEOMETRY = true;//may want to turn off once SpatialStrategy impls do it.
 
     protected ShapeBuilder() {
     }
 
     protected JtsGeometry jtsGeometry(Geometry geom) {
         //dateline180Check is false because ElasticSearch does it's own dateline wrapping
-        JtsGeometry jtsGeometry = new JtsGeometry(geom, SPATIAL_CONTEXT, false, multiPolygonMayOverlap);
-        if (autoValidateJtsGeometry)
+        JtsGeometry jtsGeometry = new JtsGeometry(geom, SPATIAL_CONTEXT, false, MULTI_POLYGON_MAY_OVERLAP);
+        if (AUTO_VALIDATE_JTS_GEOMETRY)
             jtsGeometry.validate();
-        if (autoIndexJtsGeometry)
+        if (AUTO_INDEX_JTS_GEOMETRY)
             jtsGeometry.index();
         return jtsGeometry;
     }
@@ -262,7 +261,7 @@ public abstract class ShapeBuilder extends ToXContentToBytes implements NamedWri
      * Can either be a leaf node consisting of a Coordinate, or a parent with
      * children
      */
-    protected static class CoordinateNode implements ToXContent {
+    protected static class CoordinateNode implements ToXContentObject {
 
         protected final Coordinate coordinate;
         protected final List<CoordinateNode> children;
@@ -382,7 +381,7 @@ public abstract class ShapeBuilder extends ToXContentToBytes implements NamedWri
         }
     }
 
-    public static enum Orientation {
+    public enum Orientation {
         LEFT,
         RIGHT;
 
@@ -428,7 +427,7 @@ public abstract class ShapeBuilder extends ToXContentToBytes implements NamedWri
     /**
      * Enumeration that lists all {@link GeoShapeType}s that can be handled
      */
-    public static enum GeoShapeType {
+    public enum GeoShapeType {
         POINT("point"),
         MULTIPOINT("multipoint"),
         LINESTRING("linestring"),
@@ -441,7 +440,7 @@ public abstract class ShapeBuilder extends ToXContentToBytes implements NamedWri
 
         private final String shapename;
 
-        private GeoShapeType(String shapename) {
+        GeoShapeType(String shapename) {
             this.shapename = shapename;
         }
 
@@ -708,5 +707,10 @@ public abstract class ShapeBuilder extends ToXContentToBytes implements NamedWri
     @Override
     public String getWriteableName() {
         return type().shapeName();
+    }
+
+    @Override
+    public String toString() {
+        return Strings.toString(this, true, true);
     }
 }

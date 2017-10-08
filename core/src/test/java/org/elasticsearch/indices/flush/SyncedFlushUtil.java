@@ -42,7 +42,7 @@ public class SyncedFlushUtil {
      */
     public static ShardsSyncedFlushResult attemptSyncedFlush(InternalTestCluster cluster, ShardId shardId) {
         SyncedFlushService service = cluster.getInstance(SyncedFlushService.class);
-        LatchedListener<ShardsSyncedFlushResult> listener = new LatchedListener();
+        LatchedListener<ShardsSyncedFlushResult> listener = new LatchedListener<>();
         service.attemptSyncedFlush(shardId, listener);
         try {
             listener.latch.await();
@@ -57,7 +57,7 @@ public class SyncedFlushUtil {
 
     public static final class LatchedListener<T> implements ActionListener<T> {
         public volatile T result;
-        public volatile Throwable error;
+        public volatile Exception error;
         public final CountDownLatch latch = new CountDownLatch(1);
 
         @Override
@@ -67,7 +67,7 @@ public class SyncedFlushUtil {
         }
 
         @Override
-        public void onFailure(Throwable e) {
+        public void onFailure(Exception e) {
             error = e;
             latch.countDown();
         }

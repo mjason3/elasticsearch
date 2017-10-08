@@ -1,26 +1,29 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to Elasticsearch under one or more contributor
+ * license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright
+ * ownership. Elasticsearch licenses this file to you under
+ * the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 package org.elasticsearch.common.geo;
 
+import org.apache.lucene.geo.Rectangle;
+import org.apache.lucene.spatial.util.MortonEncoder;
+import org.apache.lucene.util.BitUtil;
+
 import java.util.ArrayList;
 import java.util.Collection;
-
-import org.apache.lucene.spatial.geopoint.document.GeoPointField;
-import org.apache.lucene.util.BitUtil;
 
 /**
  * Utilities for converting to/from the GeoHash standard
@@ -39,10 +42,26 @@ public class GeoHashUtils {
 
     /** maximum precision for geohash strings */
     public static final int PRECISION = 12;
-    private static final short MORTON_OFFSET = (GeoPointField.BITS<<1) - (PRECISION*5);
+    /** number of bits used for quantizing latitude and longitude values */
+    public static final short BITS = 31;
+    /** scaling factors to convert lat/lon into unsigned space */
+    private static final double LAT_SCALE = (0x1L<<BITS)/180.0D;
+    private static final double LON_SCALE = (0x1L<<BITS)/360.0D;
+    private static final short MORTON_OFFSET = (BITS<<1) - (PRECISION*5);
 
     // No instance:
     private GeoHashUtils() {
+    }
+
+    /*************************
+     * 31 bit encoding utils *
+     *************************/
+    public static long encodeLatLon(final double lat, final double lon) {
+      long result = MortonEncoder.encode(lat, lon);
+      if (result == 0xFFFFFFFFFFFFFFFFL) {
+        return result & 0xC000000000000000L;
+      }
+      return result >>> 2;
     }
 
     /**
@@ -51,7 +70,7 @@ public class GeoHashUtils {
     public static final long longEncode(final double lon, final double lat, final int level) {
         // shift to appropriate level
         final short msf = (short)(((12 - level) * 5) + MORTON_OFFSET);
-        return ((BitUtil.flipFlop(GeoPointField.encodeLatLon(lat, lon)) >>> msf) << 4) | level;
+        return ((BitUtil.flipFlop(encodeLatLon(lat, lon)) >>> msf) << 4) | level;
     }
 
     /**
@@ -117,7 +136,7 @@ public class GeoHashUtils {
      */
     public static final String stringEncode(final double lon, final double lat, final int level) {
         // convert to geohashlong
-        final long ghLong = fromMorton(GeoPointField.encodeLatLon(lat, lon), level);
+        final long ghLong = fromMorton(encodeLatLon(lat, lon), level);
         return stringEncode(ghLong);
 
     }
@@ -138,7 +157,7 @@ public class GeoHashUtils {
 
         StringBuilder geoHash = new StringBuilder();
         short precision = 0;
-        final short msf = (GeoPointField.BITS<<1)-5;
+        final short msf = (BITS<<1)-5;
         long mask = 31L<<msf;
         do {
             geoHash.append(BASE_32[(int)((mask & hashedVal)>>>(msf-(precision*5)))]);
@@ -172,8 +191,28 @@ public class GeoHashUtils {
         return BitUtil.flipFlop(((geoHashLong >>> 4) << odd) << (((12 - level) * 5) + (MORTON_OFFSET - odd)));
     }
 
-    private static final char encode(int x, int y) {
+    private static char encode(int x, int y) {
         return BASE_32[((x & 1) + ((y & 1) * 2) + ((x & 2) * 2) + ((y & 2) * 4) + ((x & 4) * 4)) % 32];
+    }
+
+    /**
+     * Computes the bounding box coordinates from a given geohash
+     *
+     * @param geohash Geohash of the defined cell
+     * @return GeoRect rectangle defining the bounding box
+     */
+    public static Rectangle bbox(final String geohash) {
+        // bottom left is the coordinate
+        GeoPoint bottomLeft = GeoPoint.fromGeohash(geohash);
+        long ghLong = longEncode(geohash);
+        // shift away the level
+        ghLong >>>= 4;
+        // deinterleave and add 1 to lat and lon to get topRight
+        long lat = BitUtil.deinterleave(ghLong >>> 1) + 1;
+        long lon = BitUtil.deinterleave(ghLong) + 1;
+        GeoPoint topRight = GeoPoint.fromGeohash(BitUtil.interleave((int)lon, (int)lat) << 4 | geohash.length());
+
+        return new Rectangle(bottomLeft.lat(), topRight.lat(), bottomLeft.lon(), topRight.lon());
     }
 
     /**
@@ -195,7 +234,7 @@ public class GeoHashUtils {
      * @param dy      delta of the second grid coordinate (must be -1, 0 or +1)
      * @return geohash of the defined cell
      */
-    public final static String neighbor(String geohash, int level, int dx, int dy) {
+    public static final String neighbor(String geohash, int level, int dx, int dy) {
         int cell = BASE_32_STRING.indexOf(geohash.charAt(level -1));
 
         // Decoding the Geohash bit pattern to determine grid coordinates
@@ -278,5 +317,33 @@ public class GeoHashUtils {
         }
 
         return neighbors;
+    }
+
+    /** decode longitude value from morton encoded geo point */
+    public static final double decodeLongitude(final long hash) {
+      return unscaleLon(BitUtil.deinterleave(hash));
+    }
+
+    /** decode latitude value from morton encoded geo point */
+    public static final double decodeLatitude(final long hash) {
+      return unscaleLat(BitUtil.deinterleave(hash >>> 1));
+    }
+
+    private static double unscaleLon(final long val) {
+      return (val / LON_SCALE) - 180;
+    }
+
+    private static double unscaleLat(final long val) {
+      return (val / LAT_SCALE) - 90;
+    }
+
+    /** returns the latitude value from the string based geohash */
+    public static final double decodeLatitude(final String geohash) {
+        return decodeLatitude(mortonEncode(geohash));
+    }
+
+    /** returns the latitude value from the string based geohash */
+    public static final double decodeLongitude(final String geohash) {
+        return decodeLongitude(mortonEncode(geohash));
     }
 }

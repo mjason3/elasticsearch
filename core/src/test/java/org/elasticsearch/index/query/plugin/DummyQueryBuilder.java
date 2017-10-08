@@ -20,22 +20,18 @@
 package org.elasticsearch.index.query.plugin;
 
 import org.apache.lucene.search.Query;
-import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.query.AbstractQueryBuilder;
-import org.elasticsearch.index.query.QueryParseContext;
 import org.elasticsearch.index.query.QueryShardContext;
 import org.elasticsearch.index.query.plugin.DummyQueryParserPlugin.DummyQuery;
 
 import java.io.IOException;
-import java.util.Optional;
 
 public class DummyQueryBuilder extends AbstractQueryBuilder<DummyQueryBuilder> {
-    private static final String NAME = "dummy";
-    static final ParseField QUERY_NAME_FIELD = new ParseField(NAME);
+    public static final String NAME = "dummy";
 
     public DummyQueryBuilder() {
     }
@@ -54,10 +50,10 @@ public class DummyQueryBuilder extends AbstractQueryBuilder<DummyQueryBuilder> {
         builder.startObject(NAME).endObject();
     }
 
-    public static Optional<DummyQueryBuilder> fromXContent(QueryParseContext parseContext) throws IOException {
-        XContentParser.Token token = parseContext.parser().nextToken();
+    public static DummyQueryBuilder fromXContent(XContentParser parser) throws IOException {
+        XContentParser.Token token = parser.nextToken();
         assert token == XContentParser.Token.END_OBJECT;
-        return Optional.of(new DummyQueryBuilder());
+        return new DummyQueryBuilder();
     }
 
     @Override

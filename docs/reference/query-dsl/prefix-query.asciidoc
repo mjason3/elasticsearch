@@ -28,18 +28,6 @@ GET /_search
 --------------------------------------------------
 // CONSOLE
 
-Or :
-
-[source,js]
---------------------------------------------------
-GET /_search
-{ "query": {
-    "prefix" : { "user" :  { "prefix" : "ki", "boost" : 2.0 } }
-  }
-}
---------------------------------------------------
-// CONSOLE
-
 This multi term query allows you to control how it gets rewritten using the
 <<query-dsl-multi-term-rewrite,rewrite>>
 parameter.

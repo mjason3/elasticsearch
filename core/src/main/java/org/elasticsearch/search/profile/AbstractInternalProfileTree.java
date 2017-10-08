@@ -162,10 +162,9 @@ public abstract class AbstractInternalProfileTree<PB extends AbstractProfileBrea
 
         // TODO this would be better done bottom-up instead of top-down to avoid
         // calculating the same times over and over...but worth the effort?
-        long nodeTime = getNodeTime(timings, childrenProfileResults);
         String type = getTypeFromElement(element);
         String description = getDescriptionFromElement(element);
-        return new ProfileResult(type, description, timings, childrenProfileResults, nodeTime);
+        return new ProfileResult(type, description, timings, childrenProfileResults);
     }
 
     protected abstract String getTypeFromElement(E element);
@@ -182,28 +181,6 @@ public abstract class AbstractInternalProfileTree<PB extends AbstractProfileBrea
         ArrayList<Integer> parentNode = tree.get(parent);
         parentNode.add(childToken);
         tree.set(parent, parentNode);
-    }
-
-    /**
-     * Internal helper to calculate the time of a node, inclusive of children
-     *
-     * @param timings
-     *            A map of breakdown timing for the node
-     * @param children
-     *            All children profile results at this node
-     * @return The total time at this node, inclusive of children
-     */
-    private static long getNodeTime(Map<String, Long> timings, List<ProfileResult> children) {
-        long nodeTime = 0;
-        for (long time : timings.values()) {
-            nodeTime += time;
-        }
-
-        // Then add up our children
-        for (ProfileResult child : children) {
-            nodeTime += getNodeTime(child.getTimeBreakdown(), child.getProfiledChildren());
-        }
-        return nodeTime;
     }
 
 }

@@ -21,7 +21,6 @@ package org.elasticsearch.painless.node;
 
 import org.elasticsearch.painless.Definition;
 import org.elasticsearch.painless.Globals;
-import org.elasticsearch.painless.Definition.Sort;
 import org.elasticsearch.painless.Definition.Type;
 import org.elasticsearch.painless.Location;
 import org.elasticsearch.painless.AnalyzerCaster;
@@ -43,10 +42,11 @@ import static org.elasticsearch.painless.WriterConstants.EQUALS;
  */
 public final class EComp extends AExpression {
 
-    final Operation operation;
-    AExpression left;
-    AExpression right;
-    Type promotedType;
+    private final Operation operation;
+    private AExpression left;
+    private AExpression right;
+
+    private Type promotedType;
 
     public EComp(Location location, Operation operation, AExpression left, AExpression right) {
         super(location);
@@ -55,7 +55,7 @@ public final class EComp extends AExpression {
         this.left = Objects.requireNonNull(left);
         this.right = Objects.requireNonNull(right);
     }
-    
+
     @Override
     void extractVariables(Set<String> variables) {
         left.extractVariables(variables);
@@ -96,7 +96,7 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
+        if (promotedType.dynamic) {
             left.expected = left.actual;
             right.expected = right.actual;
         } else {
@@ -112,17 +112,17 @@ public final class EComp extends AExpression {
         }
 
         if ((left.constant != null || left.isNull) && (right.constant != null || right.isNull)) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.BOOL) {
+            if (sort == boolean.class) {
                 constant = (boolean)left.constant == (boolean)right.constant;
-            } else if (sort == Sort.INT) {
+            } else if (sort == int.class) {
                 constant = (int)left.constant == (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant == (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant == (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant == (double)right.constant;
             } else if (!left.isNull) {
                 constant = left.constant.equals(right.constant);
@@ -147,13 +147,8 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
-            left.expected = left.actual;
-            right.expected = right.actual;
-        } else {
-            left.expected = promotedType;
-            right.expected = promotedType;
-        }
+        left.expected = promotedType;
+        right.expected = promotedType;
 
         left = left.cast(variables);
         right = right.cast(variables);
@@ -163,17 +158,17 @@ public final class EComp extends AExpression {
         }
 
         if ((left.constant != null || left.isNull) && (right.constant != null || right.isNull)) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.BOOL) {
+            if (sort == boolean.class) {
                 constant = (boolean)left.constant == (boolean)right.constant;
-            } else if (sort == Sort.INT) {
+            } else if (sort == int.class) {
                 constant = (int)left.constant == (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant == (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant == (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant == (double)right.constant;
             } else {
                 constant = left.constant == right.constant;
@@ -194,7 +189,7 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
+        if (promotedType.dynamic) {
             left.expected = left.actual;
             right.expected = right.actual;
         } else {
@@ -210,17 +205,17 @@ public final class EComp extends AExpression {
         }
 
         if ((left.constant != null || left.isNull) && (right.constant != null || right.isNull)) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.BOOL) {
+            if (sort == boolean.class) {
                 constant = (boolean)left.constant != (boolean)right.constant;
-            } else if (sort == Sort.INT) {
+            } else if (sort == int.class) {
                 constant = (int)left.constant != (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant != (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant != (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant != (double)right.constant;
             } else if (!left.isNull) {
                 constant = !left.constant.equals(right.constant);
@@ -245,13 +240,8 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
-            left.expected = left.actual;
-            right.expected = right.actual;
-        } else {
-            left.expected = promotedType;
-            right.expected = promotedType;
-        }
+        left.expected = promotedType;
+        right.expected = promotedType;
 
         left = left.cast(variables);
         right = right.cast(variables);
@@ -261,17 +251,17 @@ public final class EComp extends AExpression {
         }
 
         if ((left.constant != null || left.isNull) && (right.constant != null || right.isNull)) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.BOOL) {
+            if (sort == boolean.class) {
                 constant = (boolean)left.constant != (boolean)right.constant;
-            } else if (sort == Sort.INT) {
+            } else if (sort == int.class) {
                 constant = (int)left.constant != (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant != (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant != (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant != (double)right.constant;
             } else {
                 constant = left.constant != right.constant;
@@ -292,7 +282,7 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
+        if (promotedType.dynamic) {
             left.expected = left.actual;
             right.expected = right.actual;
         } else {
@@ -304,15 +294,15 @@ public final class EComp extends AExpression {
         right = right.cast(variables);
 
         if (left.constant != null && right.constant != null) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.INT) {
+            if (sort == int.class) {
                 constant = (int)left.constant >= (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant >= (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant >= (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant >= (double)right.constant;
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
@@ -333,7 +323,7 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
+        if (promotedType.dynamic) {
             left.expected = left.actual;
             right.expected = right.actual;
         } else {
@@ -345,15 +335,15 @@ public final class EComp extends AExpression {
         right = right.cast(variables);
 
         if (left.constant != null && right.constant != null) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.INT) {
+            if (sort == int.class) {
                 constant = (int)left.constant > (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant > (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant > (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant > (double)right.constant;
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
@@ -374,7 +364,7 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
+        if (promotedType.dynamic) {
             left.expected = left.actual;
             right.expected = right.actual;
         } else {
@@ -386,15 +376,15 @@ public final class EComp extends AExpression {
         right = right.cast(variables);
 
         if (left.constant != null && right.constant != null) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.INT) {
+            if (sort == int.class) {
                 constant = (int)left.constant <= (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant <= (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant <= (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant <= (double)right.constant;
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
@@ -415,7 +405,7 @@ public final class EComp extends AExpression {
                 "[" + left.actual.name + "] and [" + right.actual.name + "]."));
         }
 
-        if (promotedType.sort == Sort.DEF) {
+        if (promotedType.dynamic) {
             left.expected = left.actual;
             right.expected = right.actual;
         } else {
@@ -427,15 +417,15 @@ public final class EComp extends AExpression {
         right = right.cast(variables);
 
         if (left.constant != null && right.constant != null) {
-            Sort sort = promotedType.sort;
+            Class<?> sort = promotedType.clazz;
 
-            if (sort == Sort.INT) {
+            if (sort == int.class) {
                 constant = (int)left.constant < (int)right.constant;
-            } else if (sort == Sort.LONG) {
+            } else if (sort == long.class) {
                 constant = (long)left.constant < (long)right.constant;
-            } else if (sort == Sort.FLOAT) {
+            } else if (sort == float.class) {
                 constant = (float)left.constant < (float)right.constant;
-            } else if (sort == Sort.DOUBLE) {
+            } else if (sort == double.class) {
                 constant = (double)left.constant < (double)right.constant;
             } else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
@@ -449,134 +439,117 @@ public final class EComp extends AExpression {
     void write(MethodWriter writer, Globals globals) {
         writer.writeDebugInfo(location);
 
-        boolean branch = tru != null || fals != null;
-
         left.write(writer, globals);
 
         if (!right.isNull) {
             right.write(writer, globals);
         }
 
-        Label jump = tru != null ? tru : fals != null ? fals : new Label();
+        Label jump = new Label();
         Label end = new Label();
 
-        boolean eq = (operation == Operation.EQ || operation == Operation.EQR) && (tru != null || fals == null) ||
-            (operation == Operation.NE || operation == Operation.NER) && fals != null;
-        boolean ne = (operation == Operation.NE || operation == Operation.NER) && (tru != null || fals == null) ||
-            (operation == Operation.EQ || operation == Operation.EQR) && fals != null;
-        boolean lt  = operation == Operation.LT  && (tru != null || fals == null) || operation == Operation.GTE && fals != null;
-        boolean lte = operation == Operation.LTE && (tru != null || fals == null) || operation == Operation.GT  && fals != null;
-        boolean gt  = operation == Operation.GT  && (tru != null || fals == null) || operation == Operation.LTE && fals != null;
-        boolean gte = operation == Operation.GTE && (tru != null || fals == null) || operation == Operation.LT  && fals != null;
+        boolean eq = (operation == Operation.EQ || operation == Operation.EQR);
+        boolean ne = (operation == Operation.NE || operation == Operation.NER);
+        boolean lt  = operation == Operation.LT;
+        boolean lte = operation == Operation.LTE;
+        boolean gt  = operation == Operation.GT;
+        boolean gte = operation == Operation.GTE;
 
         boolean writejump = true;
 
-        switch (promotedType.sort) {
-            case VOID:
-            case BYTE:
-            case SHORT:
-            case CHAR:
+        Class<?> sort = promotedType.clazz;
+
+        if (sort == void.class || sort == byte.class || sort == short.class || sort == char.class) {
+            throw createError(new IllegalStateException("Illegal tree structure."));
+        } else if (sort == boolean.class) {
+            if (eq) writer.ifCmp(promotedType.type, MethodWriter.EQ, jump);
+            else if (ne) writer.ifCmp(promotedType.type, MethodWriter.NE, jump);
+            else {
                 throw createError(new IllegalStateException("Illegal tree structure."));
-            case BOOL:
-                if      (eq) writer.ifZCmp(MethodWriter.EQ, jump);
-                else if (ne) writer.ifZCmp(MethodWriter.NE, jump);
-                else {
-                    throw createError(new IllegalStateException("Illegal tree structure."));
-                }
+            }
+        } else if (sort == int.class || sort == long.class || sort == float.class || sort == double.class) {
+            if (eq) writer.ifCmp(promotedType.type, MethodWriter.EQ, jump);
+            else if (ne) writer.ifCmp(promotedType.type, MethodWriter.NE, jump);
+            else if (lt) writer.ifCmp(promotedType.type, MethodWriter.LT, jump);
+            else if (lte) writer.ifCmp(promotedType.type, MethodWriter.LE, jump);
+            else if (gt) writer.ifCmp(promotedType.type, MethodWriter.GT, jump);
+            else if (gte) writer.ifCmp(promotedType.type, MethodWriter.GE, jump);
+            else {
+                throw createError(new IllegalStateException("Illegal tree structure."));
+            }
 
-                break;
-            case INT:
-            case LONG:
-            case FLOAT:
-            case DOUBLE:
-                if      (eq)  writer.ifCmp(promotedType.type, MethodWriter.EQ, jump);
-                else if (ne)  writer.ifCmp(promotedType.type, MethodWriter.NE, jump);
-                else if (lt)  writer.ifCmp(promotedType.type, MethodWriter.LT, jump);
-                else if (lte) writer.ifCmp(promotedType.type, MethodWriter.LE, jump);
-                else if (gt)  writer.ifCmp(promotedType.type, MethodWriter.GT, jump);
-                else if (gte) writer.ifCmp(promotedType.type, MethodWriter.GE, jump);
-                else {
-                    throw createError(new IllegalStateException("Illegal tree structure."));
-                }
+        } else if (promotedType.dynamic) {
+            org.objectweb.asm.Type booleanType = org.objectweb.asm.Type.getType(boolean.class);
+            org.objectweb.asm.Type descriptor = org.objectweb.asm.Type.getMethodType(booleanType, left.actual.type, right.actual.type);
 
-                break;
-            case DEF:
-                org.objectweb.asm.Type booleanType = org.objectweb.asm.Type.getType(boolean.class);
-                org.objectweb.asm.Type descriptor = org.objectweb.asm.Type.getMethodType(booleanType, left.actual.type, right.actual.type);
-                if (eq) {
-                    if (right.isNull) {
-                        writer.ifNull(jump);
-                    } else if (!left.isNull && (operation == Operation.EQ || operation == Operation.NE)) {
-                        writer.invokeDefCall("eq", descriptor, DefBootstrap.BINARY_OPERATOR, DefBootstrap.OPERATOR_ALLOWS_NULL);
-                        writejump = false;
-                    } else {
-                        writer.ifCmp(promotedType.type, MethodWriter.EQ, jump);
-                    }
-                } else if (ne) {
-                    if (right.isNull) {
-                        writer.ifNonNull(jump);
-                    } else if (!left.isNull && (operation == Operation.EQ || operation == Operation.NE)) {
-                        writer.invokeDefCall("eq", descriptor, DefBootstrap.BINARY_OPERATOR, DefBootstrap.OPERATOR_ALLOWS_NULL);
-                        writer.ifZCmp(MethodWriter.EQ, jump);
-                    } else {
-                        writer.ifCmp(promotedType.type, MethodWriter.NE, jump);
-                    }
-                } else if (lt) {
-                    writer.invokeDefCall("lt", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
-                    writejump = false;
-                } else if (lte) {
-                    writer.invokeDefCall("lte", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
-                    writejump = false;
-                } else if (gt) {
-                    writer.invokeDefCall("gt", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
-                    writejump = false;
-                } else if (gte) {
-                    writer.invokeDefCall("gte", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
+            if (eq) {
+                if (right.isNull) {
+                    writer.ifNull(jump);
+                } else if (!left.isNull && operation == Operation.EQ) {
+                    writer.invokeDefCall("eq", descriptor, DefBootstrap.BINARY_OPERATOR, DefBootstrap.OPERATOR_ALLOWS_NULL);
                     writejump = false;
                 } else {
-                    throw createError(new IllegalStateException("Illegal tree structure."));
+                    writer.ifCmp(promotedType.type, MethodWriter.EQ, jump);
                 }
-
-                if (branch && !writejump) {
-                    writer.ifZCmp(MethodWriter.NE, jump);
-                }
-
-                break;
-            default:
-                if (eq) {
-                    if (right.isNull) {
-                        writer.ifNull(jump);
-                    } else if (operation == Operation.EQ || operation == Operation.NE) {
-                        writer.invokeStatic(OBJECTS_TYPE, EQUALS);
-
-                        if (branch) {
-                            writer.ifZCmp(MethodWriter.NE, jump);
-                        }
-
-                        writejump = false;
-                    } else {
-                        writer.ifCmp(promotedType.type, MethodWriter.EQ, jump);
-                    }
-                } else if (ne) {
-                    if (right.isNull) {
-                        writer.ifNonNull(jump);
-                    } else if (operation == Operation.EQ || operation == Operation.NE) {
-                        writer.invokeStatic(OBJECTS_TYPE, EQUALS);
-                        writer.ifZCmp(MethodWriter.EQ, jump);
-                    } else {
-                        writer.ifCmp(promotedType.type, MethodWriter.NE, jump);
-                    }
+            } else if (ne) {
+                if (right.isNull) {
+                    writer.ifNonNull(jump);
+                } else if (!left.isNull && operation == Operation.NE) {
+                    writer.invokeDefCall("eq", descriptor, DefBootstrap.BINARY_OPERATOR, DefBootstrap.OPERATOR_ALLOWS_NULL);
+                    writer.ifZCmp(MethodWriter.EQ, jump);
                 } else {
-                    throw createError(new IllegalStateException("Illegal tree structure."));
+                    writer.ifCmp(promotedType.type, MethodWriter.NE, jump);
                 }
+            } else if (lt) {
+                writer.invokeDefCall("lt", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
+                writejump = false;
+            } else if (lte) {
+                writer.invokeDefCall("lte", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
+                writejump = false;
+            } else if (gt) {
+                writer.invokeDefCall("gt", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
+                writejump = false;
+            } else if (gte) {
+                writer.invokeDefCall("gte", descriptor, DefBootstrap.BINARY_OPERATOR, 0);
+                writejump = false;
+            } else {
+                throw createError(new IllegalStateException("Illegal tree structure."));
+            }
+        } else {
+            if (eq) {
+                if (right.isNull) {
+                    writer.ifNull(jump);
+                } else if (operation == Operation.EQ) {
+                    writer.invokeStatic(OBJECTS_TYPE, EQUALS);
+                    writejump = false;
+                } else {
+                    writer.ifCmp(promotedType.type, MethodWriter.EQ, jump);
+                }
+            } else if (ne) {
+                if (right.isNull) {
+                    writer.ifNonNull(jump);
+                } else if (operation == Operation.NE) {
+                    writer.invokeStatic(OBJECTS_TYPE, EQUALS);
+                    writer.ifZCmp(MethodWriter.EQ, jump);
+                } else {
+                    writer.ifCmp(promotedType.type, MethodWriter.NE, jump);
+                }
+            } else {
+                throw createError(new IllegalStateException("Illegal tree structure."));
+            }
         }
 
-        if (!branch && writejump) {
+        if (writejump) {
             writer.push(false);
             writer.goTo(end);
             writer.mark(jump);
             writer.push(true);
             writer.mark(end);
         }
+    }
+
+    @Override
+    public String toString() {
+        return singleLineToString(left, operation.symbol, right);
     }
 }

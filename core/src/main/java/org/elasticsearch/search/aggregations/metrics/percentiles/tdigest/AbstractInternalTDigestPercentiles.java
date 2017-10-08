@@ -28,18 +28,18 @@ import org.elasticsearch.search.aggregations.metrics.InternalNumericMetricsAggre
 import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 abstract class AbstractInternalTDigestPercentiles extends InternalNumericMetricsAggregation.MultiValue {
 
-    protected double[] keys;
-    protected TDigestState state;
-    private boolean keyed;
+    protected final double[] keys;
+    protected final TDigestState state;
+    final boolean keyed;
 
-    AbstractInternalTDigestPercentiles() {} // for serialization
-
-    public AbstractInternalTDigestPercentiles(String name, double[] keys, TDigestState state, boolean keyed, DocValueFormat formatter,
+    AbstractInternalTDigestPercentiles(String name, double[] keys, TDigestState state, boolean keyed, DocValueFormat formatter,
             List<PipelineAggregator> pipelineAggregators,
             Map<String, Object> metaData) {
         super(name, pipelineAggregators, metaData);
@@ -49,12 +49,35 @@ abstract class AbstractInternalTDigestPercentiles extends InternalNumericMetrics
         this.format = formatter;
     }
 
+    /**
+     * Read from a stream.
+     */
+    protected AbstractInternalTDigestPercentiles(StreamInput in) throws IOException {
+        super(in);
+        format = in.readNamedWriteable(DocValueFormat.class);
+        keys = in.readDoubleArray();
+        state = TDigestState.read(in);
+        keyed = in.readBoolean();
+    }
+
+    @Override
+    protected void doWriteTo(StreamOutput out) throws IOException {
+        out.writeNamedWriteable(format);
+        out.writeDoubleArray(keys);
+        TDigestState.write(state, out);
+        out.writeBoolean(keyed);
+    }
+
     @Override
     public double value(String name) {
         return value(Double.parseDouble(name));
     }
 
     public abstract double value(double key);
+
+    DocValueFormat formatter() {
+        return format;
+    }
 
     public long getEstimatedMemoryFootprint() {
         return state.byteSize();
@@ -77,31 +100,9 @@ abstract class AbstractInternalTDigestPercentiles extends InternalNumericMetrics
             List<PipelineAggregator> pipelineAggregators, Map<String, Object> metaData);
 
     @Override
-    protected void doReadFrom(StreamInput in) throws IOException {
-        format = in.readNamedWriteable(DocValueFormat.class);
-        keys = new double[in.readInt()];
-        for (int i = 0; i < keys.length; ++i) {
-            keys[i] = in.readDouble();
-        }
-        state = TDigestState.read(in);
-        keyed = in.readBoolean();
-    }
-
-    @Override
-    protected void doWriteTo(StreamOutput out) throws IOException {
-        out.writeNamedWriteable(format);
-        out.writeInt(keys.length);
-        for (int i = 0 ; i < keys.length; ++i) {
-            out.writeDouble(keys[i]);
-        }
-        TDigestState.write(state, out);
-        out.writeBoolean(keyed);
-    }
-
-    @Override
     public XContentBuilder doXContentBody(XContentBuilder builder, Params params) throws IOException {
         if (keyed) {
-            builder.startObject(CommonFields.VALUES);
+            builder.startObject(CommonFields.VALUES.getPreferredName());
             for(int i = 0; i < keys.length; ++i) {
                 String key = String.valueOf(keys[i]);
                 double value = value(keys[i]);
@@ -112,19 +113,32 @@ abstract class AbstractInternalTDigestPercentiles extends InternalNumericMetrics
             }
             builder.endObject();
         } else {
-            builder.startArray(CommonFields.VALUES);
+            builder.startArray(CommonFields.VALUES.getPreferredName());
             for (int i = 0; i < keys.length; i++) {
                 double value = value(keys[i]);
                 builder.startObject();
-                builder.field(CommonFields.KEY, keys[i]);
-                builder.field(CommonFields.VALUE, value);
+                builder.field(CommonFields.KEY.getPreferredName(), keys[i]);
+                builder.field(CommonFields.VALUE.getPreferredName(), value);
                 if (format != DocValueFormat.RAW) {
-                    builder.field(CommonFields.VALUE_AS_STRING, format.format(value));
+                    builder.field(CommonFields.VALUE_AS_STRING.getPreferredName(), format.format(value));
                 }
                 builder.endObject();
             }
             builder.endArray();
         }
         return builder;
+    }
+
+    @Override
+    protected boolean doEquals(Object obj) {
+        AbstractInternalTDigestPercentiles that = (AbstractInternalTDigestPercentiles) obj;
+        return keyed == that.keyed
+                && Arrays.equals(keys, that.keys)
+                && Objects.equals(state, that.state);
+    }
+
+    @Override
+    protected int doHashCode() {
+        return Objects.hash(keyed, Arrays.hashCode(keys), state);
     }
 }

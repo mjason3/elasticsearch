@@ -19,45 +19,48 @@
 
 package org.elasticsearch.script.mustache;
 
-import org.elasticsearch.action.ActionModule;
-import org.elasticsearch.action.search.template.MultiSearchTemplateAction;
-import org.elasticsearch.action.search.template.SearchTemplateAction;
-import org.elasticsearch.action.search.template.TransportMultiSearchTemplateAction;
-import org.elasticsearch.action.search.template.TransportSearchTemplateAction;
-import org.elasticsearch.common.network.NetworkModule;
+import org.elasticsearch.action.ActionRequest;
+import org.elasticsearch.action.ActionResponse;
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
+import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.common.settings.ClusterSettings;
+import org.elasticsearch.common.settings.IndexScopedSettings;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.settings.SettingsFilter;
+import org.elasticsearch.plugins.ActionPlugin;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.plugins.ScriptPlugin;
-import org.elasticsearch.rest.action.search.template.RestDeleteSearchTemplateAction;
-import org.elasticsearch.rest.action.search.template.RestGetSearchTemplateAction;
-import org.elasticsearch.rest.action.search.template.RestMultiSearchTemplateAction;
-import org.elasticsearch.rest.action.search.template.RestPutSearchTemplateAction;
-import org.elasticsearch.rest.action.search.template.RestRenderSearchTemplateAction;
-import org.elasticsearch.rest.action.search.template.RestSearchTemplateAction;
-import org.elasticsearch.script.ScriptEngineRegistry;
-import org.elasticsearch.script.ScriptEngineService;
-import org.elasticsearch.script.ScriptModule;
+import org.elasticsearch.plugins.SearchPlugin;
+import org.elasticsearch.rest.RestController;
+import org.elasticsearch.rest.RestHandler;
+import org.elasticsearch.script.ScriptContext;
+import org.elasticsearch.script.ScriptEngine;
 
-public class MustachePlugin extends Plugin implements ScriptPlugin {
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.function.Supplier;
+
+public class MustachePlugin extends Plugin implements ScriptPlugin, ActionPlugin, SearchPlugin {
 
     @Override
-    public ScriptEngineService getScriptEngineService(Settings settings) {
-        return new MustacheScriptEngineService(settings);
+    public ScriptEngine getScriptEngine(Settings settings, Collection<ScriptContext<?>>contexts) {
+        return new MustacheScriptEngine();
     }
 
-    public void onModule(ActionModule module) {
-        module.registerAction(SearchTemplateAction.INSTANCE, TransportSearchTemplateAction.class);
-        module.registerAction(MultiSearchTemplateAction.INSTANCE, TransportMultiSearchTemplateAction.class);
+    @Override
+    public List<ActionHandler<? extends ActionRequest, ? extends ActionResponse>> getActions() {
+        return Arrays.asList(new ActionHandler<>(SearchTemplateAction.INSTANCE, TransportSearchTemplateAction.class),
+                new ActionHandler<>(MultiSearchTemplateAction.INSTANCE, TransportMultiSearchTemplateAction.class));
     }
 
-    public void onModule(NetworkModule module) {
-        if (module.isTransportClient() == false) {
-            module.registerRestHandler(RestSearchTemplateAction.class);
-            module.registerRestHandler(RestMultiSearchTemplateAction.class);
-            module.registerRestHandler(RestGetSearchTemplateAction.class);
-            module.registerRestHandler(RestPutSearchTemplateAction.class);
-            module.registerRestHandler(RestDeleteSearchTemplateAction.class);
-            module.registerRestHandler(RestRenderSearchTemplateAction.class);
-        }
+    @Override
+    public List<RestHandler> getRestHandlers(Settings settings, RestController restController, ClusterSettings clusterSettings,
+            IndexScopedSettings indexScopedSettings, SettingsFilter settingsFilter, IndexNameExpressionResolver indexNameExpressionResolver,
+            Supplier<DiscoveryNodes> nodesInCluster) {
+        return Arrays.asList(
+                new RestSearchTemplateAction(settings, restController),
+                new RestMultiSearchTemplateAction(settings, restController),
+                new RestRenderSearchTemplateAction(settings, restController));
     }
 }

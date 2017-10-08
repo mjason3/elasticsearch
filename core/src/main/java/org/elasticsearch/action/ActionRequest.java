@@ -25,10 +25,7 @@ import org.elasticsearch.transport.TransportRequest;
 
 import java.io.IOException;
 
-/**
- *
- */
-public abstract class ActionRequest<Request extends ActionRequest<Request>> extends TransportRequest {
+public abstract class ActionRequest extends TransportRequest {
 
     public ActionRequest() {
         super();
@@ -37,12 +34,16 @@ public abstract class ActionRequest<Request extends ActionRequest<Request>> exte
         // this.listenerThreaded = request.listenerThreaded();
     }
 
+    public ActionRequest(StreamInput in) throws IOException {
+        super(in);
+    }
+
     public abstract ActionRequestValidationException validate();
 
     /**
-     * Should this task persist its result after it has finished?
+     * Should this task store its result after it has finished?
      */
-    public boolean getShouldPersistResult() {
+    public boolean getShouldStoreResult() {
         return false;
     }
 

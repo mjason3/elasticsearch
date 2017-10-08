@@ -21,9 +21,11 @@ package org.elasticsearch.cluster;
 
 import org.elasticsearch.action.UnavailableShardsException;
 import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.support.ActiveShardCount;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
@@ -33,16 +35,14 @@ import static org.elasticsearch.client.Requests.createIndexRequest;
 import static org.elasticsearch.common.unit.TimeValue.timeValueSeconds;
 import static org.hamcrest.Matchers.equalTo;
 
-/**
- *
- */
 @ClusterScope(scope= Scope.TEST, numDataNodes =0)
 public class SimpleDataNodesIT extends ESIntegTestCase {
     public void testDataNodes() throws Exception {
         internalCluster().startNode(Settings.builder().put(Node.NODE_DATA_SETTING.getKey(), false).build());
-        client().admin().indices().create(createIndexRequest("test")).actionGet();
+        client().admin().indices().create(createIndexRequest("test").waitForActiveShards(ActiveShardCount.NONE)).actionGet();
         try {
-            client().index(Requests.indexRequest("test").type("type1").id("1").source(source("1", "test")).timeout(timeValueSeconds(1))).actionGet();
+            client().index(Requests.indexRequest("test").type("type1").id("1").source(source("1", "test"), XContentType.JSON)
+                .timeout(timeValueSeconds(1))).actionGet();
             fail("no allocation should happen");
         } catch (UnavailableShardsException e) {
             // all is well
@@ -53,7 +53,8 @@ public class SimpleDataNodesIT extends ESIntegTestCase {
 
         // still no shard should be allocated
         try {
-            client().index(Requests.indexRequest("test").type("type1").id("1").source(source("1", "test")).timeout(timeValueSeconds(1))).actionGet();
+            client().index(Requests.indexRequest("test").type("type1").id("1").source(source("1", "test"), XContentType.JSON)
+                .timeout(timeValueSeconds(1))).actionGet();
             fail("no allocation should happen");
         } catch (UnavailableShardsException e) {
             // all is well
@@ -63,7 +64,8 @@ public class SimpleDataNodesIT extends ESIntegTestCase {
         internalCluster().startNode(Settings.builder().put(Node.NODE_DATA_SETTING.getKey(), true).build());
         assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("3").setLocal(true).execute().actionGet().isTimedOut(), equalTo(false));
 
-        IndexResponse indexResponse = client().index(Requests.indexRequest("test").type("type1").id("1").source(source("1", "test"))).actionGet();
+        IndexResponse indexResponse = client().index(Requests.indexRequest("test").type("type1").id("1")
+            .source(source("1", "test"), XContentType.JSON)).actionGet();
         assertThat(indexResponse.getId(), equalTo("1"));
         assertThat(indexResponse.getType(), equalTo("type1"));
     }

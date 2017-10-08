@@ -24,14 +24,14 @@ import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.xcontent.ToXContent;
+import org.elasticsearch.common.xcontent.ToXContentObject;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
 
-public class MultiTermVectorsResponse extends ActionResponse implements Iterable<MultiTermVectorsItemResponse>, ToXContent {
+public class MultiTermVectorsResponse extends ActionResponse implements Iterable<MultiTermVectorsItemResponse>, ToXContentObject {
 
     /**
      * Represents a failure.
@@ -40,13 +40,13 @@ public class MultiTermVectorsResponse extends ActionResponse implements Iterable
         private String index;
         private String type;
         private String id;
-        private Throwable cause;
+        private Exception cause;
 
         Failure() {
 
         }
 
-        public Failure(String index, String type, String id, Throwable cause) {
+        public Failure(String index, String type, String id, Exception cause) {
             this.index = index;
             this.type = type;
             this.id = id;
@@ -77,7 +77,7 @@ public class MultiTermVectorsResponse extends ActionResponse implements Iterable
         /**
          * The failure cause.
          */
-        public Throwable getCause() {
+        public Exception getCause() {
             return this.cause;
         }
 
@@ -92,7 +92,7 @@ public class MultiTermVectorsResponse extends ActionResponse implements Iterable
             index = in.readString();
             type = in.readOptionalString();
             id = in.readString();
-            cause = in.readThrowable();
+            cause = in.readException();
         }
 
         @Override
@@ -100,7 +100,7 @@ public class MultiTermVectorsResponse extends ActionResponse implements Iterable
             out.writeString(index);
             out.writeOptionalString(type);
             out.writeString(id);
-            out.writeThrowable(cause);
+            out.writeException(cause);
         }
     }
 
@@ -124,6 +124,7 @@ public class MultiTermVectorsResponse extends ActionResponse implements Iterable
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+        builder.startObject();
         builder.startArray(Fields.DOCS);
         for (MultiTermVectorsItemResponse response : responses) {
             if (response.isFailed()) {
@@ -132,16 +133,15 @@ public class MultiTermVectorsResponse extends ActionResponse implements Iterable
                 builder.field(Fields._INDEX, failure.getIndex());
                 builder.field(Fields._TYPE, failure.getType());
                 builder.field(Fields._ID, failure.getId());
-                ElasticsearchException.renderThrowable(builder, params, failure.getCause());
+                ElasticsearchException.generateFailureXContent(builder, params, failure.getCause(), true);
                 builder.endObject();
             } else {
                 TermVectorsResponse getResponse = response.getResponse();
-                builder.startObject();
                 getResponse.toXContent(builder, params);
-                builder.endObject();
             }
         }
         builder.endArray();
+        builder.endObject();
         return builder;
     }
 

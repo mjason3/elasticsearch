@@ -36,7 +36,9 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.set.Sets;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.snapshots.IndexShardSnapshotStatus;
+import org.elasticsearch.repositories.RepositoryData;
 import org.elasticsearch.snapshots.Snapshot;
+import org.elasticsearch.snapshots.SnapshotException;
 import org.elasticsearch.snapshots.SnapshotId;
 import org.elasticsearch.snapshots.SnapshotInfo;
 import org.elasticsearch.snapshots.SnapshotMissingException;
@@ -56,8 +58,6 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- */
 public class TransportSnapshotsStatusAction extends TransportMasterNodeAction<SnapshotsStatusRequest, SnapshotsStatusResponse> {
 
     private final SnapshotsService snapshotsService;
@@ -69,7 +69,7 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeAction<Sn
                                           ThreadPool threadPool, SnapshotsService snapshotsService,
                                           TransportNodesSnapshotsStatus transportNodesSnapshotsStatus,
                                           ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
-        super(settings, SnapshotsStatusAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, SnapshotsStatusRequest::new);
+        super(settings, SnapshotsStatusAction.NAME, transportService, clusterService, threadPool, actionFilters, SnapshotsStatusRequest::new, indexNameExpressionResolver);
         this.snapshotsService = snapshotsService;
         this.transportNodesSnapshotsStatus = transportNodesSnapshotsStatus;
     }
@@ -125,13 +125,13 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeAction<Sn
                                 List<SnapshotsInProgress.Entry> currentSnapshots =
                                         snapshotsService.currentSnapshots(request.repository(), Arrays.asList(request.snapshots()));
                                 listener.onResponse(buildResponse(request, currentSnapshots, nodeSnapshotStatuses));
-                            } catch (Throwable e) {
+                            } catch (Exception e) {
                                 listener.onFailure(e);
                             }
                         }
 
                         @Override
-                        public void onFailure(Throwable e) {
+                        public void onFailure(Exception e) {
                             listener.onFailure(e);
                         }
                     });
@@ -203,19 +203,28 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeAction<Sn
         final String repositoryName = request.repository();
         if (Strings.hasText(repositoryName) && request.snapshots() != null && request.snapshots().length > 0) {
             final Set<String> requestedSnapshotNames = Sets.newHashSet(request.snapshots());
-            final Map<String, SnapshotId> matchedSnapshotIds = snapshotsService.snapshotIds(repositoryName).stream()
+            final RepositoryData repositoryData = snapshotsService.getRepositoryData(repositoryName);
+            final Map<String, SnapshotId> matchedSnapshotIds = repositoryData.getAllSnapshotIds().stream()
                 .filter(s -> requestedSnapshotNames.contains(s.getName()))
                 .collect(Collectors.toMap(SnapshotId::getName, Function.identity()));
             for (final String snapshotName : request.snapshots()) {
+                if (currentSnapshotNames.contains(snapshotName)) {
+                    // we've already found this snapshot in the current snapshot entries, so skip over
+                    continue;
+                }
                 SnapshotId snapshotId = matchedSnapshotIds.get(snapshotName);
                 if (snapshotId == null) {
-                    if (currentSnapshotNames.contains(snapshotName)) {
-                        // we've already found this snapshot in the current snapshot entries, so skip over
+                    // neither in the current snapshot entries nor found in the repository
+                    if (request.ignoreUnavailable()) {
+                        // ignoring unavailable snapshots, so skip over
+                        logger.debug("snapshot status request ignoring snapshot [{}], not found in repository [{}]",
+                                     snapshotName, repositoryName);
                         continue;
                     } else {
-                        // neither in the current snapshot entries nor found in the repository
                         throw new SnapshotMissingException(repositoryName, snapshotName);
                     }
+                } else if (repositoryData.getIncompatibleSnapshotIds().contains(snapshotId)) {
+                    throw new SnapshotException(repositoryName, snapshotName, "cannot get the status for an incompatible snapshot");
                 }
                 SnapshotInfo snapshotInfo = snapshotsService.snapshot(repositoryName, snapshotId);
                 List<SnapshotIndexShardStatus> shardStatusBuilder = new ArrayList<>();
@@ -239,7 +248,7 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeAction<Sn
                         default:
                             throw new IllegalArgumentException("Unknown snapshot state " + snapshotInfo.state());
                     }
-                    builder.add(new SnapshotStatus(new Snapshot(repositoryName, snapshotInfo.snapshotId()), state, Collections.unmodifiableList(shardStatusBuilder)));
+                    builder.add(new SnapshotStatus(new Snapshot(repositoryName, snapshotId), state, Collections.unmodifiableList(shardStatusBuilder)));
                 }
             }
         }

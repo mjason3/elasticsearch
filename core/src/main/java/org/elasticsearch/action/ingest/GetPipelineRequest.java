@@ -21,26 +21,36 @@ package org.elasticsearch.action.ingest;
 
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.support.master.MasterNodeReadRequest;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 
 import java.io.IOException;
-import java.util.Objects;
-
-import static org.elasticsearch.action.ValidateActions.addValidationError;
 
 public class GetPipelineRequest extends MasterNodeReadRequest<GetPipelineRequest> {
 
     private String[] ids;
 
     public GetPipelineRequest(String... ids) {
-        if (ids == null || ids.length == 0) {
-            throw new IllegalArgumentException("No ids specified");
+        if (ids == null) {
+            throw new IllegalArgumentException("ids cannot be null");
         }
         this.ids = ids;
     }
 
     GetPipelineRequest() {
+        this.ids = Strings.EMPTY_ARRAY;
+    }
+
+    public GetPipelineRequest(StreamInput in) throws IOException {
+        super(in);
+        ids = in.readStringArray();
+    }
+
+    @Override
+    public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
+        out.writeStringArray(ids);
     }
 
     public String[] getIds() {
@@ -54,13 +64,6 @@ public class GetPipelineRequest extends MasterNodeReadRequest<GetPipelineRequest
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        super.readFrom(in);
-        ids = in.readStringArray();
-    }
-
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        super.writeTo(out);
-        out.writeStringArray(ids);
+        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 }

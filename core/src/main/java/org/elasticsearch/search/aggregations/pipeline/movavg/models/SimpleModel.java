@@ -20,8 +20,6 @@
 package org.elasticsearch.search.aggregations.pipeline.movavg.models;
 
 import org.elasticsearch.common.Nullable;
-import org.elasticsearch.common.ParseField;
-import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -38,7 +36,6 @@ import java.util.Map;
  */
 public class SimpleModel extends MovAvgModel {
     public static final String NAME = "simple";
-    public static final ParseField NAME_FIELD = new ParseField(NAME);
 
     public SimpleModel() {
     }
@@ -101,8 +98,7 @@ public class SimpleModel extends MovAvgModel {
 
     public static final AbstractModelParser PARSER = new AbstractModelParser() {
         @Override
-        public MovAvgModel parse(@Nullable Map<String, Object> settings, String pipelineName, int windowSize,
-                                 ParseFieldMatcher parseFieldMatcher) throws ParseException {
+        public MovAvgModel parse(@Nullable Map<String, Object> settings, String pipelineName, int windowSize) throws ParseException {
             checkUnrecognizedParams(settings);
             return new SimpleModel();
         }
@@ -111,7 +107,7 @@ public class SimpleModel extends MovAvgModel {
     public static class SimpleModelBuilder implements MovAvgModelBuilder {
         @Override
         public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-            builder.field(MovAvgPipelineAggregationBuilder.MODEL.getPreferredName(), NAME_FIELD.getPreferredName());
+            builder.field(MovAvgPipelineAggregationBuilder.MODEL.getPreferredName(), NAME);
             return builder;
         }
 

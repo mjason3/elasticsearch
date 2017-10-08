@@ -22,7 +22,6 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.search.DocValueFormat;
-import org.elasticsearch.search.aggregations.AggregationStreams;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.metrics.InternalNumericMetricsAggregation;
 import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
@@ -30,27 +29,9 @@ import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
-/**
-*
-*/
 public class InternalStats extends InternalNumericMetricsAggregation.MultiValue implements Stats {
-
-    public final static Type TYPE = new Type("stats");
-
-    public final static AggregationStreams.Stream STREAM = new AggregationStreams.Stream() {
-        @Override
-        public InternalStats readResult(StreamInput in) throws IOException {
-            InternalStats result = new InternalStats();
-            result.readFrom(in);
-            return result;
-        }
-    };
-
-    public static void registerStreams() {
-        AggregationStreams.registerStream(STREAM, TYPE.stream());
-    }
-
     enum Metrics {
 
         count, sum, min, max, avg;
@@ -60,12 +41,10 @@ public class InternalStats extends InternalNumericMetricsAggregation.MultiValue 
         }
     }
 
-    protected long count;
-    protected double min;
-    protected double max;
-    protected double sum;
-
-    protected InternalStats() {} // for serialization
+    protected final long count;
+    protected final double min;
+    protected final double max;
+    protected final double sum;
 
     public InternalStats(String name, long count, double sum, double min, double max, DocValueFormat formatter,
             List<PipelineAggregator> pipelineAggregators,
@@ -76,6 +55,36 @@ public class InternalStats extends InternalNumericMetricsAggregation.MultiValue 
         this.min = min;
         this.max = max;
         this.format = formatter;
+    }
+
+    /**
+     * Read from a stream.
+     */
+    public InternalStats(StreamInput in) throws IOException {
+        super(in);
+        format = in.readNamedWriteable(DocValueFormat.class);
+        count = in.readVLong();
+        min = in.readDouble();
+        max = in.readDouble();
+        sum = in.readDouble();
+    }
+
+    @Override
+    protected final void doWriteTo(StreamOutput out) throws IOException {
+        out.writeNamedWriteable(format);
+        out.writeVLong(count);
+        out.writeDouble(min);
+        out.writeDouble(max);
+        out.writeDouble(sum);
+        writeOtherStatsTo(out);
+    }
+
+    protected void writeOtherStatsTo(StreamOutput out) throws IOException {
+    }
+
+    @Override
+    public String getWriteableName() {
+        return StatsAggregationBuilder.NAME;
     }
 
     @Override
@@ -104,11 +113,6 @@ public class InternalStats extends InternalNumericMetricsAggregation.MultiValue 
     }
 
     @Override
-    public String getCountAsString() {
-        return valueAsString(Metrics.count.name());
-    }
-
-    @Override
     public String getMinAsString() {
         return valueAsString(Metrics.min.name());
     }
@@ -126,11 +130,6 @@ public class InternalStats extends InternalNumericMetricsAggregation.MultiValue 
     @Override
     public String getSumAsString() {
         return valueAsString(Metrics.sum.name());
-    }
-
-    @Override
-    public Type type() {
-        return TYPE;
     }
 
     @Override
@@ -163,32 +162,6 @@ public class InternalStats extends InternalNumericMetricsAggregation.MultiValue 
         return new InternalStats(name, count, sum, min, max, format, pipelineAggregators(), getMetaData());
     }
 
-    @Override
-    protected void doReadFrom(StreamInput in) throws IOException {
-        format = in.readNamedWriteable(DocValueFormat.class);
-        count = in.readVLong();
-        min = in.readDouble();
-        max = in.readDouble();
-        sum = in.readDouble();
-        readOtherStatsFrom(in);
-    }
-
-    public void readOtherStatsFrom(StreamInput in) throws IOException {
-    }
-
-    @Override
-    protected void doWriteTo(StreamOutput out) throws IOException {
-        out.writeNamedWriteable(format);
-        out.writeVLong(count);
-        out.writeDouble(min);
-        out.writeDouble(max);
-        out.writeDouble(sum);
-        writeOtherStatsTo(out);
-    }
-
-    protected void writeOtherStatsTo(StreamOutput out) throws IOException {
-    }
-
     static class Fields {
         public static final String COUNT = "count";
         public static final String MIN = "min";
@@ -204,21 +177,42 @@ public class InternalStats extends InternalNumericMetricsAggregation.MultiValue 
     @Override
     public XContentBuilder doXContentBody(XContentBuilder builder, Params params) throws IOException {
         builder.field(Fields.COUNT, count);
-        builder.field(Fields.MIN, count != 0 ? min : null);
-        builder.field(Fields.MAX, count != 0 ? max : null);
-        builder.field(Fields.AVG, count != 0 ? getAvg() : null);
-        builder.field(Fields.SUM, count != 0 ? sum : null);
-        if (count != 0 && format != DocValueFormat.RAW) {
-            builder.field(Fields.MIN_AS_STRING, format.format(min));
-            builder.field(Fields.MAX_AS_STRING, format.format(max));
-            builder.field(Fields.AVG_AS_STRING, format.format(getAvg()));
-            builder.field(Fields.SUM_AS_STRING, format.format(sum));
+        if (count != 0) {
+            builder.field(Fields.MIN, min);
+            builder.field(Fields.MAX, max);
+            builder.field(Fields.AVG, getAvg());
+            builder.field(Fields.SUM, sum);
+            if (format != DocValueFormat.RAW) {
+                builder.field(Fields.MIN_AS_STRING, format.format(min));
+                builder.field(Fields.MAX_AS_STRING, format.format(max));
+                builder.field(Fields.AVG_AS_STRING, format.format(getAvg()));
+                builder.field(Fields.SUM_AS_STRING, format.format(sum));
+            }
+        } else {
+            builder.nullField(Fields.MIN);
+            builder.nullField(Fields.MAX);
+            builder.nullField(Fields.AVG);
+            builder.nullField(Fields.SUM);
         }
-        otherStatsToXCotent(builder, params);
+        otherStatsToXContent(builder, params);
         return builder;
     }
 
-    protected XContentBuilder otherStatsToXCotent(XContentBuilder builder, Params params) throws IOException {
+    protected XContentBuilder otherStatsToXContent(XContentBuilder builder, Params params) throws IOException {
         return builder;
+    }
+
+    @Override
+    protected int doHashCode() {
+        return Objects.hash(count, min, max, sum);
+    }
+
+    @Override
+    protected boolean doEquals(Object obj) {
+        InternalStats other = (InternalStats) obj;
+        return count == other.count &&
+            Double.compare(min, other.min) == 0 &&
+            Double.compare(max, other.max) == 0 &&
+            Double.compare(sum, other.sum) == 0;
     }
 }

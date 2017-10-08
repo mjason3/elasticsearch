@@ -20,14 +20,12 @@
 package org.elasticsearch.common.io.stream;
 
 import java.io.IOException;
+import java.util.function.Supplier;
 
 /**
  * Implementers can be written to a {@linkplain StreamOutput} and read from a {@linkplain StreamInput}. This allows them to be "thrown
  * across the wire" using Elasticsearch's internal protocol. If the implementer also implements equals and hashCode then a copy made by
- * serializing and deserializing must be equal and have the same hashCode. It isn't required that such a copy be entirely unchanged. For
- * example, {@link org.elasticsearch.common.unit.TimeValue} converts the time to nanoseconds for serialization.
- * {@linkplain org.elasticsearch.common.unit.TimeValue} actually implements {@linkplain Writeable} not {@linkplain Streamable} but it has
- * the same contract.
+ * serializing and deserializing must be equal and have the same hashCode. It isn't required that such a copy be entirely unchanged.
  *
  * Prefer implementing {@link Writeable} over implementing this interface where possible. Lots of code depends on this interface so this
  * isn't always possible.
@@ -46,4 +44,12 @@ public interface Streamable {
      * Write this object's fields to a {@linkplain StreamOutput}.
      */
     void writeTo(StreamOutput out) throws IOException;
+
+    static <T extends Streamable> Writeable.Reader<T> newWriteableReader(Supplier<T> supplier) {
+        return (StreamInput in) -> {
+            T request = supplier.get();
+            request.readFrom(in);
+            return request;
+        };
+    }
 }

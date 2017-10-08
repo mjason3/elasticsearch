@@ -32,8 +32,24 @@ import java.util.regex.Matcher
  * Generates REST tests for each snippet marked // TEST.
  */
 public class RestTestsFromSnippetsTask extends SnippetsTask {
+    /**
+     * These languages aren't supported by the syntax highlighter so we
+     * shouldn't use them.
+     */
+    private static final List BAD_LANGUAGES = ['json', 'javascript']
+
     @Input
     Map<String, String> setups = new HashMap()
+
+    /**
+     * A list of files that contain snippets that *probably* should be
+     * converted to `// CONSOLE` but have yet to be converted. If a file is in
+     * this list and doesn't contain unconverted snippets this task will fail.
+     * If there are unconverted snippets not in this list then this task will
+     * fail. All files are paths relative to the docs dir.
+     */
+    @Input
+    List<String> expectedUnconvertedCandidates = []
 
     /**
      * Root directory of the tests being generated. To make rest tests happy
@@ -50,6 +66,7 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
         TestBuilder builder = new TestBuilder()
         doFirst { outputRoot().delete() }
         perSnippet builder.&handleSnippet
+        doLast builder.&checkUnconverted
         doLast builder.&finishLastTest
     }
 
@@ -59,6 +76,27 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
      */
     File outputRoot() {
         return new File(testRoot, '/rest-api-spec/test')
+    }
+
+    /**
+     * Is this snippet a candidate for conversion to `// CONSOLE`?
+     */
+    static isConsoleCandidate(Snippet snippet) {
+        /* Snippets that are responses or already marked as `// CONSOLE` or
+         * `// NOTCONSOLE` are not candidates. */
+        if (snippet.console != null || snippet.testResponse) {
+            return false
+        }
+        /* js snippets almost always should be marked with `// CONSOLE`. js
+         * snippets that shouldn't be marked `// CONSOLE`, like examples for
+         * js client, should always be marked with `// NOTCONSOLE`.
+         *
+         * `sh` snippets that contain `curl` almost always should be marked
+         * with `// CONSOLE`. In the exceptionally rare cases where they are
+         * not communicating with Elasticsearch, like the examples in the ec2
+         * and gce discovery plugins, the snippets should be marked
+         * `// NOTCONSOLE`. */
+        return snippet.language == 'js' || snippet.curl
     }
 
     private class TestBuilder {
@@ -83,16 +121,33 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
         PrintWriter current
 
         /**
+         * Files containing all snippets that *probably* should be converted
+         * to `// CONSOLE` but have yet to be converted. All files are paths
+         * relative to the docs dir.
+         */
+        Set<String> unconvertedCandidates = new HashSet<>()
+
+        /**
+         * The last non-TESTRESPONSE snippet.
+         */
+        Snippet previousTest
+
+        /**
          * Called each time a snippet is encountered. Tracks the snippets and
          * calls buildTest to actually build the test.
          */
         void handleSnippet(Snippet snippet) {
-            if (snippet.language == 'json') {
+            if (RestTestsFromSnippetsTask.isConsoleCandidate(snippet)) {
+                unconvertedCandidates.add(snippet.path.toString()
+                    .replace('\\', '/'))
+            }
+            if (BAD_LANGUAGES.contains(snippet.language)) {
                 throw new InvalidUserDataException(
-                        "$snippet: Use `js` instead of `json`.")
+                        "$snippet: Use `js` instead of `${snippet.language}`.")
             }
             if (snippet.testSetup) {
                 setup(snippet)
+                previousTest = snippet
                 return
             }
             if (snippet.testResponse) {
@@ -101,6 +156,7 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
             }
             if (snippet.test || snippet.console) {
                 test(snippet)
+                previousTest = snippet
                 return
             }
             // Must be an unmarked snippet....
@@ -109,38 +165,84 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
         private void test(Snippet test) {
             setupCurrent(test)
 
-            if (false == test.continued) {
+            if (test.continued) {
+                /* Catch some difficult to debug errors with // TEST[continued]
+                 * and throw a helpful error message. */
+                if (previousTest == null || previousTest.path != test.path) {
+                    throw new InvalidUserDataException("// TEST[continued] " +
+                        "cannot be on first snippet in a file: $test")
+                }
+                if (previousTest != null && previousTest.testSetup) {
+                    throw new InvalidUserDataException("// TEST[continued] " +
+                        "cannot immediately follow // TESTSETUP: $test")
+                }
+            } else {
                 current.println('---')
-                current.println("\"$test.start\":")
+                current.println("\"line_$test.start\":")
+                /* The Elasticsearch test runner doesn't support the warnings
+                 * construct unless you output this skip. Since we don't know
+                 * if this snippet will use the warnings construct we emit this
+                 * warning every time. */
+                current.println("  - skip:")
+                current.println("      features: ")
+                current.println("        - stash_in_key")
+                current.println("        - stash_in_path")
+                current.println("        - stash_path_replace")
+                current.println("        - warnings")
             }
             if (test.skipTest) {
-                current.println("  - skip:")
-                current.println("      features: always_skip")
+                if (test.continued) {
+                    throw new InvalidUserDataException("Continued snippets "
+                        + "can't be skipped")
+                }
+                current.println("        - always_skip")
                 current.println("      reason: $test.skipTest")
             }
             if (test.setup != null) {
-                String setup = setups[test.setup]
-                if (setup == null) {
-                    throw new InvalidUserDataException("Couldn't find setup "
-                        + "for $test")
+                // Insert a setup defined outside of the docs
+                for (String setupName : test.setup.split(',')) {
+                    String setup = setups[setupName]
+                    if (setup == null) {
+                        throw new InvalidUserDataException("Couldn't find setup "
+                                + "for $test")
+                    }
+                    current.println(setup)
                 }
-                current.println(setup)
             }
 
             body(test, false)
         }
 
         private void response(Snippet response) {
-            current.println("  - response_body: |")
-            response.contents.eachLine { current.println("      $it") }
+            current.println("  - match: ")
+            current.println("      \$body: ")
+            response.contents.eachLine { current.println("        $it") }
         }
 
-        void emitDo(String method, String pathAndQuery,
-                String body, String catchPart, boolean inSetup) {
+        void emitDo(String method, String pathAndQuery, String body,
+                String catchPart, List warnings, boolean inSetup) {
             def (String path, String query) = pathAndQuery.tokenize('?')
+            if (path == null) {
+                path = '' // Catch requests to the root...
+            } else {
+                // Escape some characters that are also escaped by sense
+                path = path.replace('<', '%3C').replace('>', '%3E')
+                path = path.replace('{', '%7B').replace('}', '%7D')
+                path = path.replace('|', '%7C')
+            }
             current.println("  - do:")
             if (catchPart != null) {
                 current.println("      catch: $catchPart")
+            }
+            if (false == warnings.isEmpty()) {
+                current.println("      warnings:")
+                for (String warning in warnings) {
+                    // Escape " because we're going to quote the warning
+                    String escaped = warning.replaceAll('"', '\\\\"')
+                    /* Quote the warning in case it starts with [ which makes
+                     * it look too much like an array. */
+                    current.println("         - \"$escaped\"")
+                }
             }
             current.println("      raw:")
             current.println("        method: $method")
@@ -183,13 +285,6 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
             current.println('---')
             current.println("setup:")
             body(setup, true)
-            // always wait for yellow before anything is executed
-            current.println(
-                    "  - do:\n" +
-                    "      raw:\n" +
-                    "        method: GET\n" +
-                    "        path: \"_cluster/health\"\n" +
-                    "        wait_for_status: \"yellow\"")
         }
 
         private void body(Snippet snippet, boolean inSetup) {
@@ -206,7 +301,8 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
                     // Leading '/'s break the generated paths
                     pathAndQuery = pathAndQuery.substring(1)
                 }
-                emitDo(method, pathAndQuery, body, catchPart, inSetup)
+                emitDo(method, pathAndQuery, body, catchPart, snippet.warnings,
+                    inSetup)
             }
         }
 
@@ -222,7 +318,7 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
             Path dest = outputRoot().toPath().resolve(test.path)
             // Replace the extension
             String fileName = dest.getName(dest.nameCount - 1)
-            dest = dest.parent.resolve(fileName.replace('.asciidoc', '.yaml'))
+            dest = dest.parent.resolve(fileName.replace('.asciidoc', '.yml'))
 
             // Now setup the writer
             Files.createDirectories(dest.parent)
@@ -233,6 +329,36 @@ public class RestTestsFromSnippetsTask extends SnippetsTask {
             if (current != null) {
                 current.close()
                 current = null
+            }
+        }
+
+        void checkUnconverted() {
+            List<String> listedButNotFound = []
+            for (String listed : expectedUnconvertedCandidates) {
+                if (false == unconvertedCandidates.remove(listed)) {
+                    listedButNotFound.add(listed)
+                }
+            }
+            String message = ""
+            if (false == listedButNotFound.isEmpty()) {
+                Collections.sort(listedButNotFound)
+                listedButNotFound = listedButNotFound.collect {'    ' + it}
+                message += "Expected unconverted snippets but none found in:\n"
+                message += listedButNotFound.join("\n")
+            }
+            if (false == unconvertedCandidates.isEmpty()) {
+                List<String> foundButNotListed =
+                    new ArrayList<>(unconvertedCandidates)
+                Collections.sort(foundButNotListed)
+                foundButNotListed = foundButNotListed.collect {'    ' + it}
+                if (false == "".equals(message)) {
+                    message += "\n"
+                }
+                message += "Unexpected unconverted snippets:\n"
+                message += foundButNotListed.join("\n")
+            }
+            if (false == "".equals(message)) {
+                throw new InvalidUserDataException(message);
             }
         }
     }

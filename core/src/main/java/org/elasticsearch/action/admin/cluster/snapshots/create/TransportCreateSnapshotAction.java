@@ -45,7 +45,7 @@ public class TransportCreateSnapshotAction extends TransportMasterNodeAction<Cre
     public TransportCreateSnapshotAction(Settings settings, TransportService transportService, ClusterService clusterService,
                                          ThreadPool threadPool, SnapshotsService snapshotsService, ActionFilters actionFilters,
                                          IndexNameExpressionResolver indexNameExpressionResolver) {
-        super(settings, CreateSnapshotAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, CreateSnapshotRequest::new);
+        super(settings, CreateSnapshotAction.NAME, transportService, clusterService, threadPool, actionFilters,CreateSnapshotRequest::new, indexNameExpressionResolver);
         this.snapshotsService = snapshotsService;
     }
 
@@ -94,10 +94,10 @@ public class TransportCreateSnapshotAction extends TransportMasterNodeAction<Cre
                         }
 
                         @Override
-                        public void onSnapshotFailure(Snapshot snapshot, Throwable t) {
+                        public void onSnapshotFailure(Snapshot snapshot, Exception e) {
                             if (snapshot.getRepository().equals(request.repository()) &&
                                     snapshot.getSnapshotId().getName().equals(request.snapshot())) {
-                                listener.onFailure(t);
+                                listener.onFailure(e);
                                 snapshotsService.removeListener(this);
                             }
                         }
@@ -108,8 +108,8 @@ public class TransportCreateSnapshotAction extends TransportMasterNodeAction<Cre
             }
 
             @Override
-            public void onFailure(Throwable t) {
-                listener.onFailure(t);
+            public void onFailure(Exception e) {
+                listener.onFailure(e);
             }
         });
     }

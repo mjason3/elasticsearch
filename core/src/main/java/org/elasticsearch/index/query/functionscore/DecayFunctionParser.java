@@ -22,12 +22,12 @@ package org.elasticsearch.index.query.functionscore;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.bytes.BytesReference;
-import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.query.QueryParseContext;
+import org.elasticsearch.plugins.SearchPlugin;
 import org.elasticsearch.search.MultiValueMode;
+import org.elasticsearch.search.SearchModule;
 
 import java.io.IOException;
 import java.util.function.BiFunction;
@@ -64,8 +64,7 @@ import java.util.function.BiFunction;
  * <p>
  * To write a new decay scoring function, create a new class that extends
  * {@link DecayFunctionBuilder}, setup a PARSER field with this class, and
- * register them both using
- * {@link org.elasticsearch.search.SearchModule#registerScoreFunction(Writeable.Reader, ScoreFunctionParser, ParseField)}.
+ * register them in {@link SearchModule#registerScoreFunctions} or {@link SearchPlugin#getScoreFunctions}
  * See {@link GaussDecayFunctionBuilder#PARSER} for an example.
  */
 public final class DecayFunctionParser<DFB extends DecayFunctionBuilder<DFB>> implements ScoreFunctionParser<DFB> {
@@ -97,8 +96,7 @@ public final class DecayFunctionParser<DFB extends DecayFunctionBuilder<DFB>> im
      * </pre>
      */
     @Override
-    public DFB fromXContent(QueryParseContext context) throws IOException, ParsingException {
-        XContentParser parser = context.parser();
+    public DFB fromXContent(XContentParser parser) throws IOException, ParsingException {
         String currentFieldName;
         XContentParser.Token token;
         MultiValueMode multiValueMode = DecayFunctionBuilder.DEFAULT_MULTI_VALUE_MODE;
@@ -112,7 +110,7 @@ public final class DecayFunctionParser<DFB extends DecayFunctionBuilder<DFB>> im
                 XContentBuilder builder = XContentFactory.jsonBuilder();
                 builder.copyCurrentStructure(parser);
                 functionBytes = builder.bytes();
-            } else if (context.getParseFieldMatcher().match(currentFieldName, MULTI_VALUE_MODE)) {
+            } else if (MULTI_VALUE_MODE.match(currentFieldName)) {
                 multiValueMode = MultiValueMode.fromString(parser.text());
             } else {
                 throw new ParsingException(parser.getTokenLocation(), "malformed score function score parameters.");

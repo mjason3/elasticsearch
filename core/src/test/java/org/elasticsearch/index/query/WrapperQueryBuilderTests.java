@@ -19,16 +19,21 @@
 
 package org.elasticsearch.index.query;
 
+import org.apache.lucene.index.Term;
 import org.apache.lucene.index.memory.MemoryIndex;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
-import org.elasticsearch.action.support.ToXContentToBytes;
+import org.apache.lucene.search.TermQuery;
 import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.xcontent.XContentHelper;
+import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.test.AbstractQueryTestCase;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.io.UnsupportedEncodingException;
 
 public class WrapperQueryBuilderTests extends AbstractQueryTestCase<WrapperQueryBuilder> {
@@ -41,58 +46,40 @@ public class WrapperQueryBuilderTests extends AbstractQueryTestCase<WrapperQuery
     @Override
     protected WrapperQueryBuilder doCreateTestQueryBuilder() {
         QueryBuilder wrappedQuery = RandomQueryBuilder.createQuery(random());
+        BytesReference bytes;
+        try {
+            bytes = XContentHelper.toXContent(wrappedQuery, XContentType.JSON, false);
+        } catch(IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
         switch (randomInt(2)) {
             case 0:
                 return new WrapperQueryBuilder(wrappedQuery.toString());
             case 1:
-                return new WrapperQueryBuilder(((ToXContentToBytes)wrappedQuery).buildAsBytes().toBytes());
+
+                return new WrapperQueryBuilder(BytesReference.toBytes(bytes));
             case 2:
-                return new WrapperQueryBuilder(((ToXContentToBytes)wrappedQuery).buildAsBytes());
+                return new WrapperQueryBuilder(bytes);
             default:
                 throw new UnsupportedOperationException();
         }
     }
 
     @Override
-    protected void doAssertLuceneQuery(WrapperQueryBuilder queryBuilder, Query query, QueryShardContext context) throws IOException {
+    protected void doAssertLuceneQuery(WrapperQueryBuilder queryBuilder, Query query, SearchContext context) throws IOException {
         QueryBuilder innerQuery = queryBuilder.rewrite(createShardContext());
-        Query expected = rewrite(innerQuery.toQuery(context));
+        Query expected = rewrite(innerQuery.toQuery(context.getQueryShardContext()));
         assertEquals(rewrite(query), expected);
     }
 
     public void testIllegalArgument() {
-        try {
-            if (randomBoolean()) {
-                new WrapperQueryBuilder((byte[]) null);
-            } else {
-                new WrapperQueryBuilder(new byte[0]);
-            }
-            fail("cannot be null or empty");
-        } catch (IllegalArgumentException e) {
-            // expected
-        }
-
-        try {
-            if (randomBoolean()) {
-                new WrapperQueryBuilder((String) null);
-            } else {
-                new WrapperQueryBuilder("");
-            }
-            fail("cannot be null or empty");
-        } catch (IllegalArgumentException e) {
-            // expected
-        }
-
-        try {
-            if (randomBoolean()) {
-                new WrapperQueryBuilder((BytesReference) null);
-            } else {
-                new WrapperQueryBuilder(new BytesArray(new byte[0]));
-            }
-            fail("cannot be null or empty");
-        } catch (IllegalArgumentException e) {
-            // expected
-        }
+        expectThrows(IllegalArgumentException.class, () -> new WrapperQueryBuilder((byte[]) null));
+        expectThrows(IllegalArgumentException.class, () -> new WrapperQueryBuilder(new byte[0]));
+        expectThrows(IllegalArgumentException.class, () -> new WrapperQueryBuilder((String) null));
+        expectThrows(IllegalArgumentException.class, () -> new WrapperQueryBuilder(""));
+        expectThrows(IllegalArgumentException.class, () -> new WrapperQueryBuilder((BytesReference) null));
+        expectThrows(IllegalArgumentException.class, () -> new WrapperQueryBuilder(new BytesArray(new byte[0])));
     }
 
     /**
@@ -101,13 +88,10 @@ public class WrapperQueryBuilderTests extends AbstractQueryTestCase<WrapperQuery
      * anything else.
      */
     @Override
-    public void testUnknownField() throws IOException {
-        try {
-            parseQuery("{ \"" + WrapperQueryBuilder.NAME + "\" : {\"bogusField\" : \"someValue\"} }");
-            fail("ParsingException expected.");
-        } catch (ParsingException e) {
-            assertTrue(e.getMessage().contains("bogusField"));
-        }
+    public void testUnknownField() {
+        String json = "{ \"" + WrapperQueryBuilder.NAME + "\" : {\"bogusField\" : \"someValue\"} }";
+        ParsingException e = expectThrows(ParsingException.class, () -> parseQuery(json));
+        assertTrue(e.getMessage().contains("bogusField"));
     }
 
     public void testFromJson() throws IOException {
@@ -133,12 +117,8 @@ public class WrapperQueryBuilderTests extends AbstractQueryTestCase<WrapperQuery
     public void testMustRewrite() throws IOException {
         TermQueryBuilder tqb = new TermQueryBuilder("foo", "bar");
         WrapperQueryBuilder qb = new WrapperQueryBuilder(tqb.toString());
-        try {
-            qb.toQuery(createShardContext());
-            fail();
-        } catch (UnsupportedOperationException e) {
-            assertEquals("this query must be rewritten first", e.getMessage());
-        }
+        UnsupportedOperationException e = expectThrows(UnsupportedOperationException.class, () -> qb.toQuery(createShardContext()));
+        assertEquals("this query must be rewritten first", e.getMessage());
         QueryBuilder rewrite = qb.rewrite(createShardContext());
         assertEquals(tqb, rewrite);
     }
@@ -159,6 +139,24 @@ public class WrapperQueryBuilderTests extends AbstractQueryTestCase<WrapperQuery
         assertEquals(query, builder.rewrite(shardContext));
         builder = new WrapperQueryBuilder(query.toString()).boost(3);
         assertEquals(new BoolQueryBuilder().must(query).boost(3), builder.rewrite(shardContext));
+    }
+
+    public void testRewriteInnerQueryToo() throws IOException {
+        QueryShardContext shardContext = createShardContext();
+
+        QueryBuilder qb = new WrapperQueryBuilder(
+            new WrapperQueryBuilder(new TermQueryBuilder("foo", "bar").toString()).toString()
+        );
+        assertEquals(new TermQuery(new Term("foo", "bar")), qb.rewrite(shardContext).toQuery(shardContext));
+        qb = new WrapperQueryBuilder(
+            new WrapperQueryBuilder(
+                new WrapperQueryBuilder(new TermQueryBuilder("foo", "bar").toString()).toString()
+            ).toString()
+        );
+        assertEquals(new TermQuery(new Term("foo", "bar")), qb.rewrite(shardContext).toQuery(shardContext));
+
+        qb = new WrapperQueryBuilder(new BoolQueryBuilder().toString());
+        assertEquals(new MatchAllDocsQuery(), qb.rewrite(shardContext).toQuery(shardContext));
     }
 
     @Override

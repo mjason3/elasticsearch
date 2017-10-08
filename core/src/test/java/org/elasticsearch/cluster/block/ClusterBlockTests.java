@@ -49,13 +49,13 @@ public class ClusterBlockTests extends ESTestCase {
             }
 
             ClusterBlock clusterBlock = new ClusterBlock(randomInt(), "cluster block #" + randomInt(), randomBoolean(),
-                    randomBoolean(), randomFrom(RestStatus.values()), levels);
+                    randomBoolean(), false, randomFrom(RestStatus.values()), levels);
 
             BytesStreamOutput out = new BytesStreamOutput();
             out.setVersion(version);
             clusterBlock.writeTo(out);
 
-            StreamInput in = StreamInput.wrap(out.bytes());
+            StreamInput in = out.bytes().streamInput();
             in.setVersion(version);
             ClusterBlock result = ClusterBlock.readClusterBlock(in);
 
@@ -75,7 +75,7 @@ public class ClusterBlockTests extends ESTestCase {
             levels.add(randomFrom(ClusterBlockLevel.values()));
         }
         ClusterBlock clusterBlock = new ClusterBlock(randomInt(), "cluster block #" + randomInt(), randomBoolean(),
-                randomBoolean(), randomFrom(RestStatus.values()), levels);
+                randomBoolean(), false, randomFrom(RestStatus.values()), levels);
         assertThat(clusterBlock.toString(), not(endsWith(",")));
     }
 
@@ -86,7 +86,7 @@ public class ClusterBlockTests extends ESTestCase {
             levels.add(randomFrom(ClusterBlockLevel.values()));
         }
         ClusterBlock globalBlock = new ClusterBlock(randomInt(), "cluster block #" + randomInt(), randomBoolean(),
-            randomBoolean(), randomFrom(RestStatus.values()), levels);
+            randomBoolean(), false, randomFrom(RestStatus.values()), levels);
         ClusterBlocks clusterBlocks = new ClusterBlocks(Collections.singleton(globalBlock), ImmutableOpenMap.of());
         ClusterBlockException exception = clusterBlocks.indicesBlockedException(randomFrom(globalBlock.levels()), new String[0]);
         assertNotNull(exception);

@@ -51,7 +51,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link AllocationService#removeDelayMarkers(RoutingAllocation)}, triggering yet
  * another cluster change event.
  */
-public class DelayedAllocationService extends AbstractLifecycleComponent<DelayedAllocationService> implements ClusterStateListener {
+public class DelayedAllocationService extends AbstractLifecycleComponent implements ClusterStateListener {
 
     static final String CLUSTER_UPDATE_TASK_SOURCE = "delayed_allocation_reroute";
 
@@ -96,8 +96,8 @@ public class DelayedAllocationService extends AbstractLifecycleComponent<Delayed
                 }
 
                 @Override
-                public void onFailure(Throwable t) {
-                    logger.warn("failed to submit schedule/execute reroute post unassigned shard", t);
+                public void onFailure(Exception e) {
+                    logger.warn("failed to submit schedule/execute reroute post unassigned shard", e);
                     removeIfSameTask(DelayedRerouteTask.this);
                 }
             });
@@ -106,12 +106,7 @@ public class DelayedAllocationService extends AbstractLifecycleComponent<Delayed
         @Override
         public ClusterState execute(ClusterState currentState) throws Exception {
             removeIfSameTask(this);
-            RoutingAllocation.Result routingResult = allocationService.reroute(currentState, "assign delayed unassigned shards");
-            if (routingResult.changed()) {
-                return ClusterState.builder(currentState).routingResult(routingResult).build();
-            } else {
-                return currentState;
-            }
+            return allocationService.reroute(currentState, "assign delayed unassigned shards");
         }
 
         @Override
@@ -125,9 +120,9 @@ public class DelayedAllocationService extends AbstractLifecycleComponent<Delayed
         }
 
         @Override
-        public void onFailure(String source, Throwable t) {
+        public void onFailure(String source, Exception e) {
             removeIfSameTask(this);
-            logger.warn("failed to schedule/execute reroute post unassigned shard", t);
+            logger.warn("failed to schedule/execute reroute post unassigned shard", e);
         }
     }
 
@@ -138,7 +133,7 @@ public class DelayedAllocationService extends AbstractLifecycleComponent<Delayed
         this.threadPool = threadPool;
         this.clusterService = clusterService;
         this.allocationService = allocationService;
-        clusterService.addFirst(this);
+        clusterService.addListener(this);
     }
 
     @Override
@@ -151,7 +146,7 @@ public class DelayedAllocationService extends AbstractLifecycleComponent<Delayed
 
     @Override
     protected void doClose() {
-        clusterService.remove(this);
+        clusterService.removeListener(this);
         removeTaskAndCancel();
     }
 
@@ -183,8 +178,8 @@ public class DelayedAllocationService extends AbstractLifecycleComponent<Delayed
     /**
      * Figure out if an existing scheduled reroute is good enough or whether we need to cancel and reschedule.
      */
-    private void scheduleIfNeeded(long currentNanoTime, ClusterState state) {
-        assertClusterStateThread();
+    private synchronized void scheduleIfNeeded(long currentNanoTime, ClusterState state) {
+        assertClusterOrMasterStateThread();
         long nextDelayNanos = UnassignedInfo.findNextDelayedAllocation(currentNanoTime, state);
         if (nextDelayNanos < 0) {
             logger.trace("no need to schedule reroute - no delayed unassigned shards");
@@ -219,7 +214,7 @@ public class DelayedAllocationService extends AbstractLifecycleComponent<Delayed
     }
 
     // protected so that it can be overridden (and disabled) by unit tests
-    protected void assertClusterStateThread() {
-        ClusterService.assertClusterStateThread();
+    protected void assertClusterOrMasterStateThread() {
+        assert ClusterService.assertClusterOrMasterStateThread();
     }
 }

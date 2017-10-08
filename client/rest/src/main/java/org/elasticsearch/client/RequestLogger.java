@@ -26,6 +26,7 @@ import org.apache.http.HttpEntity;
 import org.apache.http.HttpEntityEnclosingRequest;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
+import org.apache.http.RequestLine;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.entity.BufferedHttpEntity;
 import org.apache.http.entity.ContentType;
@@ -55,8 +56,14 @@ final class RequestLogger {
      */
     static void logResponse(Log logger, HttpUriRequest request, HttpHost host, HttpResponse httpResponse) {
         if (logger.isDebugEnabled()) {
-            logger.debug("request [" + request.getMethod() + " " + host + request.getRequestLine().getUri() +
+            logger.debug("request [" + request.getMethod() + " " + host + getUri(request.getRequestLine()) +
                     "] returned [" + httpResponse.getStatusLine() + "]");
+        }
+        if (logger.isWarnEnabled()) {
+            Header[] warnings = httpResponse.getHeaders("Warning");
+            if (warnings != null && warnings.length > 0) {
+                logger.warn(buildWarningMessage(request, host, warnings));
+            }
         }
         if (tracer.isTraceEnabled()) {
             String requestLine;
@@ -80,9 +87,11 @@ final class RequestLogger {
     /**
      * Logs a request that failed
      */
-    static void logFailedRequest(Log logger, HttpUriRequest request, HttpHost host, IOException e) {
-        logger.debug("request [" + request.getMethod() + " " + host + request.getRequestLine().getUri() + "] failed", e);
-        if (logger.isTraceEnabled()) {
+    static void logFailedRequest(Log logger, HttpUriRequest request, HttpHost host, Exception e) {
+        if (logger.isDebugEnabled()) {
+            logger.debug("request [" + request.getMethod() + " " + host + getUri(request.getRequestLine()) + "] failed", e);
+        }
+        if (tracer.isTraceEnabled()) {
             String traceRequest;
             try {
                 traceRequest = buildTraceRequest(request, host);
@@ -94,11 +103,23 @@ final class RequestLogger {
         }
     }
 
+    static String buildWarningMessage(HttpUriRequest request, HttpHost host, Header[] warnings) {
+        StringBuilder message = new StringBuilder("request [").append(request.getMethod()).append(" ").append(host)
+                .append(getUri(request.getRequestLine())).append("] returned ").append(warnings.length).append(" warnings: ");
+        for (int i = 0; i < warnings.length; i++) {
+            if (i > 0) {
+                message.append(",");
+            }
+            message.append("[").append(warnings[i].getValue()).append("]");
+        }
+        return message.toString();
+    }
+
     /**
      * Creates curl output for given request
      */
     static String buildTraceRequest(HttpUriRequest request, HttpHost host) throws IOException {
-        String requestLine = "curl -iX " + request.getMethod() + " '" + host + request.getRequestLine().getUri() + "'";
+        String requestLine = "curl -iX " + request.getMethod() + " '" + host + getUri(request.getRequestLine()) + "'";
         if (request instanceof  HttpEntityEnclosingRequest) {
             HttpEntityEnclosingRequest enclosingRequest = (HttpEntityEnclosingRequest) request;
             if (enclosingRequest.getEntity() != null) {
@@ -118,11 +139,12 @@ final class RequestLogger {
      * Creates curl output for given response
      */
     static String buildTraceResponse(HttpResponse httpResponse) throws IOException {
-        String responseLine = "# " + httpResponse.getStatusLine().toString();
+        StringBuilder responseLine = new StringBuilder();
+        responseLine.append("# ").append(httpResponse.getStatusLine());
         for (Header header : httpResponse.getAllHeaders()) {
-            responseLine += "\n# " + header.getName() + ": " + header.getValue();
+            responseLine.append("\n# ").append(header.getName()).append(": ").append(header.getValue());
         }
-        responseLine += "\n#";
+        responseLine.append("\n#");
         HttpEntity entity = httpResponse.getEntity();
         if (entity != null) {
             if (entity.isRepeatable() == false) {
@@ -131,16 +153,23 @@ final class RequestLogger {
             httpResponse.setEntity(entity);
             ContentType contentType = ContentType.get(entity);
             Charset charset = StandardCharsets.UTF_8;
-            if (contentType != null) {
+            if (contentType != null && contentType.getCharset() != null) {
                 charset = contentType.getCharset();
             }
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(entity.getContent(), charset))) {
                 String line;
                 while( (line = reader.readLine()) != null) {
-                    responseLine += "\n# " + line;
+                    responseLine.append("\n# ").append(line);
                 }
             }
         }
-        return responseLine;
+        return responseLine.toString();
+    }
+
+    private static String getUri(RequestLine requestLine) {
+        if (requestLine.getUri().charAt(0) != '/') {
+            return "/" + requestLine.getUri();
+        }
+        return requestLine.getUri();
     }
 }
